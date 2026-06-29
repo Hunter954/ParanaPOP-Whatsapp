@@ -17,5 +17,9 @@ export const config = {
   authDir: process.env.AUTH_DIR || './auth',
   botName: process.env.BOT_NAME || 'ParanaPOP Bot',
   mediaDownloadTimeoutMs: intEnv('MEDIA_DOWNLOAD_TIMEOUT_MS', 30000),
-  maxMediaBytes: intEnv('MAX_MEDIA_BYTES', 15_000_000)
+  maxMediaBytes: intEnv('MAX_MEDIA_BYTES', 15_000_000),
+  botPublishEnabled: ['1', 'true', 'yes', 'on', 'sim'].includes(String(process.env.BOT_PUBLISH_ENABLED || '').toLowerCase()),
+  botPublishApiUrl: (process.env.BOT_PUBLISH_API_URL || '').trim(),
+  botPublishToken: (process.env.BOT_PUBLISH_TOKEN || '').trim(),
+  botPublishGroupId: (process.env.BOT_PUBLISH_GROUP_ID || '').trim()
 };

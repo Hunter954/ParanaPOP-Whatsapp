@@ -49,7 +49,14 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/status', requireServiceToken, (req, res) => {
-  res.json(getStatus());
+  res.json({
+    ...getStatus(),
+    bot_publicar: {
+      enabled: config.botPublishEnabled,
+      configured: Boolean(config.botPublishApiUrl && config.botPublishToken),
+      group_id: config.botPublishGroupId || null
+    }
+  });
 });
 
 app.get('/qr', requireServiceToken, (req, res) => {

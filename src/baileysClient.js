@@ -1,5 +1,6 @@
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState
 } from '@whiskeysockets/baileys';
@@ -8,6 +9,7 @@ import P from 'pino';
 import QRCode from 'qrcode';
 import fs from 'fs/promises';
 import path from 'path';
+import axios from 'axios';
 import { config } from './config.js';
 import { resolveMedia } from './media.js';
 
@@ -21,6 +23,162 @@ let starting = false;
 let lastConnectionUpdate = null;
 let lastError = null;
 let reconnectTimer = null;
+const publishSessions = new Map();
+
+function botEnabled() {
+  return Boolean(config.botPublishEnabled && config.botPublishApiUrl && config.botPublishToken);
+}
+
+function textFromMessage(message) {
+  const m = message?.message || {};
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    ''
+  ).trim();
+}
+
+function imageMessageContent(message) {
+  return message?.message?.imageMessage || null;
+}
+
+function sessionKey(remoteJid, participant) {
+  return `${remoteJid || 'chat'}:${participant || 'user'}`;
+}
+
+async function replyMessage(jid, text) {
+  if (!sock || !jid || !text) return;
+  await sock.sendMessage(jid, { text });
+}
+
+function commandAllowed(remoteJid) {
+  if (!botEnabled()) return false;
+  if (config.botPublishGroupId && remoteJid !== config.botPublishGroupId) return false;
+  return true;
+}
+
+async function imageToPayload(message) {
+  const buffer = await downloadMediaMessage(
+    message,
+    'buffer',
+    {},
+    { logger, reuploadRequest: sock.updateMediaMessage }
+  );
+  const mimetype = imageMessageContent(message)?.mimetype || 'image/jpeg';
+  return {
+    image_base64: buffer.toString('base64'),
+    image_mimetype: mimetype,
+    image_filename: `whatsapp-${Date.now()}.${mimetype.includes('png') ? 'png' : mimetype.includes('webp') ? 'webp' : 'jpg'}`
+  };
+}
+
+async function publishToSite(session) {
+  const response = await axios.post(
+    config.botPublishApiUrl,
+    {
+      token: config.botPublishToken,
+      title: session.title,
+      content: session.content,
+      ...session.image
+    },
+    {
+      timeout: 60000,
+      headers: {
+        'X-Bot-Token': config.botPublishToken,
+        'Content-Type': 'application/json'
+      },
+      maxBodyLength: config.maxMediaBytes + 2_000_000
+    }
+  );
+  return response.data;
+}
+
+async function handlePublishBot(message) {
+  const remoteJid = message?.key?.remoteJid;
+  const participant = message?.key?.participant || message?.key?.remoteJid;
+  const fromMe = Boolean(message?.key?.fromMe);
+  if (fromMe || !remoteJid || !remoteJid.endsWith('@g.us')) return;
+
+  const text = textFromMessage(message);
+  const key = sessionKey(remoteJid, participant);
+
+  if (text.toLowerCase() === '/publicar') {
+    if (!commandAllowed(remoteJid)) {
+      await replyMessage(remoteJid, '🤖 Bot Publicar ainda não está configurado/ativo para este grupo. Confira o menu Admin > Bot Publicar.');
+      return;
+    }
+    publishSessions.set(key, { step: 'image', startedAt: Date.now() });
+    await replyMessage(remoteJid, '🚀 Vamos publicar uma matéria nova. Primeiro, envie a imagem principal da matéria.');
+    return;
+  }
+
+  if (text.toLowerCase() === '/cancelar') {
+    if (publishSessions.delete(key)) {
+      await replyMessage(remoteJid, 'Publicação cancelada. Quando quiser começar de novo, digite /publicar.');
+    }
+    return;
+  }
+
+  const session = publishSessions.get(key);
+  if (!session) return;
+
+  if (Date.now() - session.startedAt > 30 * 60 * 1000) {
+    publishSessions.delete(key);
+    await replyMessage(remoteJid, '⏰ Essa publicação expirou. Digite /publicar para começar novamente.');
+    return;
+  }
+
+  try {
+    if (session.step === 'image') {
+      if (!imageMessageContent(message)) {
+        await replyMessage(remoteJid, '📸 Agora preciso da imagem da matéria. Envie uma foto/imagem ou digite /cancelar.');
+        return;
+      }
+      session.image = await imageToPayload(message);
+      session.step = 'title';
+      publishSessions.set(key, session);
+      await replyMessage(remoteJid, 'Imagem recebida ✅ Agora envie o título da matéria.');
+      return;
+    }
+
+    if (session.step === 'title') {
+      if (!text || text.length < 5) {
+        await replyMessage(remoteJid, 'Me envie um título um pouco maior para a matéria.');
+        return;
+      }
+      session.title = text.slice(0, 500);
+      session.step = 'content';
+      publishSessions.set(key, session);
+      await replyMessage(remoteJid, 'Título salvo ✅ Agora envie o texto completo da matéria.');
+      return;
+    }
+
+    if (session.step === 'content') {
+      if (!text || text.length < 20) {
+        await replyMessage(remoteJid, 'O texto parece curto demais. Envie o conteúdo completo da matéria ou /cancelar.');
+        return;
+      }
+      session.content = text;
+      session.step = 'publishing';
+      publishSessions.set(key, session);
+      await replyMessage(remoteJid, '🛠️ Recebi tudo. Estou publicando a matéria agora...');
+      const result = await publishToSite(session);
+      publishSessions.delete(key);
+      if (result?.ok) {
+        await replyMessage(remoteJid, `✅ Matéria publicada com sucesso!\n\n${result.title || session.title}\n${result.url || ''}`.trim());
+      } else {
+        await replyMessage(remoteJid, `⚠️ Não consegui publicar: ${result?.message || 'erro desconhecido'}`);
+      }
+    }
+  } catch (error) {
+    logger.error({ error }, 'Erro no Bot Publicar');
+    publishSessions.delete(key);
+    await replyMessage(remoteJid, `⚠️ Deu erro ao publicar: ${error?.response?.data?.message || error?.message || 'erro interno'}`);
+  }
+}
+
 
 async function setQr(qr) {
   qrText = qr || null;
@@ -59,6 +217,12 @@ export async function startWhatsApp() {
     });
 
     sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+      for (const message of messages || []) {
+        await handlePublishBot(message);
+      }
+    });
 
     sock.ev.on('connection.update', async (update) => {
       lastConnectionUpdate = update;
