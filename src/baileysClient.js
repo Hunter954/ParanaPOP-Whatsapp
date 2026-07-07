@@ -371,62 +371,104 @@ function labelForFormat(format) {
   return format || 'Arte';
 }
 
-export async function sendNews(payload) {
+function firstFilled(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+  return '';
+}
+
+function boolValue(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  return ['1', 'true', 'yes', 'on', 'sim'].includes(String(value).toLowerCase());
+}
+
+function buildNewsCaption({ payload, siteName, title, summary, url, instagramDescription }) {
+  const prefix = firstFilled(
+    payload.message_prefix,
+    payload.prefix,
+    `📰 Nova matéria publicada no ${siteName}`
+  );
+
+  const parts = [prefix, '', title];
+
+  if (summary && boolValue(payload.include_summary, false)) {
+    parts.push('', summary);
+  }
+
+  if (instagramDescription && instagramDescription !== title) {
+    const cleanDescription = instagramDescription.trim();
+    const duplicatedPrefix = cleanDescription.includes(prefix) || cleanDescription.includes(title);
+    if (!duplicatedPrefix) {
+      parts.push('', cleanDescription);
+    }
+  }
+
+  if (url && boolValue(payload.include_link, true)) {
+    parts.push('', `Leia agora: ${url}`);
+  }
+
+  return parts.filter((part) => part !== undefined && part !== null).join('\n').trim();
+}
+
+export async function sendNews(payload = {}) {
   ensureConnected();
 
-  const groupId = payload.group_id;
+  const groupId = payload.group_id || payload.groupId || payload.to;
   if (!groupId) throw new Error('group_id ausente.');
 
   const post = payload.post || {};
-  const title = payload.title || payload.titulo || post.title || 'Nova matéria';
-  const url = payload.url || payload.post_url || post.url || '';
-  const summary = payload.summary || payload.resumo || post.summary || '';
-  const instagramDescription = payload.instagram_description || payload.description || payload.descricao_instagram || payload.caption || '';
+  const siteName = firstFilled(payload.portal_name, payload.site_name, payload.brand_name, post.portal_name, post.site_name, 'Paraná Pop');
+  const title = firstFilled(payload.title, payload.titulo, post.title, 'Nova matéria');
+  const url = firstFilled(payload.url, payload.post_url, post.url);
+  const summary = firstFilled(payload.summary, payload.resumo, post.summary);
+  const instagramDescription = firstFilled(
+    payload.instagram_description,
+    payload.description,
+    payload.descricao_instagram,
+    payload.caption
+  );
   const images = Array.isArray(payload.images) ? payload.images : [];
+  const caption = firstFilled(
+    payload.whatsapp_caption,
+    payload.image_caption,
+    buildNewsCaption({ payload, siteName, title, summary, url, instagramDescription })
+  );
 
   const sent = [];
 
-  for (const image of images) {
+  for (const [index, image] of images.entries()) {
     const mediaUrl = pickUrl(image);
     if (!mediaUrl) continue;
 
     const formatLabel = labelForFormat(image.format || image.type || image.name);
-    const caption = `Arte ${formatLabel} - ${title}`;
+    const imageCaption = index === 0 ? caption : firstFilled(image.caption, `Arte ${formatLabel} - ${title}`);
     const result = await sendImage({
       group_id: groupId,
       image_url: /^https?:\/\//i.test(mediaUrl) ? mediaUrl : undefined,
       image_path: /^https?:\/\//i.test(mediaUrl) ? undefined : mediaUrl,
-      caption
+      caption: imageCaption
     });
 
     sent.push({ format: formatLabel, ...result });
   }
 
-  const textParts = [
-    `📰 Nova matéria publicada no Paraná Pop`,
-    '',
-    `Título: ${title}`
-  ];
+  const shouldSendText = boolValue(payload.send_text, images.length === 0);
+  let textResult = null;
 
-  if (summary) {
-    textParts.push('', `Resumo: ${summary}`);
+  if (shouldSendText) {
+    textResult = await sendMessage({
+      group_id: groupId,
+      message: caption
+    });
   }
-
-  if (instagramDescription) {
-    textParts.push('', `Descrição sugerida para Instagram/Facebook:`, instagramDescription);
-  }
-
-  if (url) {
-    textParts.push('', `Link da matéria:`, url);
-  }
-
-  const textResult = await sendMessage({
-    group_id: groupId,
-    message: textParts.join('\n')
-  });
 
   return {
     ok: true,
+    site_name: siteName,
     sent_images: sent,
     sent_text: textResult
   };
