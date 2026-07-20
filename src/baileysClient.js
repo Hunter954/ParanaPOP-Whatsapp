@@ -24,6 +24,7 @@ let lastConnectionUpdate = null;
 let lastError = null;
 let reconnectTimer = null;
 const publishSessions = new Map();
+const photoSessions = new Map();
 
 function botEnabled() {
   return Boolean(config.botPublishEnabled && config.botPublishApiUrl && config.botPublishToken);
@@ -93,6 +94,157 @@ async function publishToSite(session) {
     }
   );
   return response.data;
+}
+
+function photoBrandForGroup(remoteJid) {
+  if (config.photoParanaPopGroupId && remoteJid === config.photoParanaPopGroupId) {
+    return {
+      key: 'paranapop',
+      name: 'Paraná Pop',
+      apiUrl: config.photoParanaPopApiUrl,
+      token: config.photoParanaPopToken,
+      needsCategory: true
+    };
+  }
+  if (config.photoTrivoxGroupId && remoteJid === config.photoTrivoxGroupId) {
+    return {
+      key: 'trivox',
+      name: 'Portal Trivox',
+      apiUrl: config.photoTrivoxApiUrl,
+      token: config.photoTrivoxToken,
+      needsCategory: false
+    };
+  }
+  return null;
+}
+
+async function requestManualPhoto(session) {
+  if (!session.brand.apiUrl || !session.brand.token) {
+    throw new Error(`Gerador manual do ${session.brand.name} não está configurado no Railway.`);
+  }
+  const response = await axios.post(
+    session.brand.apiUrl,
+    {
+      token: session.brand.token,
+      title: session.title,
+      category: session.category || '',
+      ...session.image
+    },
+    {
+      timeout: 90000,
+      headers: {
+        'X-Bot-Token': session.brand.token,
+        'Content-Type': 'application/json'
+      },
+      maxBodyLength: config.maxMediaBytes + 2_000_000
+    }
+  );
+  return response.data;
+}
+
+async function sendGeneratedPhotos(jid, result, brand) {
+  const images = Array.isArray(result?.images)
+    ? result.images
+    : (result?.image_url ? [{ url: result.image_url, label: 'Feed Instagram' }] : []);
+  if (!images.length) throw new Error(result?.message || 'O gerador não devolveu nenhuma imagem.');
+
+  for (const item of images) {
+    const media = await resolveMedia(item.url || item.image_url);
+    await sock.sendMessage(jid, {
+      image: media.buffer,
+      mimetype: media.mimetype,
+      caption: `✅ ${brand.name} — ${item.label || item.size || 'arte gerada'}`
+    });
+  }
+}
+
+async function handlePhotoBot(message) {
+  const remoteJid = message?.key?.remoteJid;
+  const participant = message?.key?.participant || remoteJid;
+  if (message?.key?.fromMe || !remoteJid || !remoteJid.endsWith('@g.us')) return false;
+
+  const text = textFromMessage(message);
+  const normalized = text.toLowerCase();
+  const key = sessionKey(remoteJid, participant);
+  const brand = photoBrandForGroup(remoteJid);
+
+  if (normalized === '/foto') {
+    if (!brand) return false;
+    if (!brand.apiUrl || !brand.token) {
+      await replyMessage(remoteJid, `⚠️ O comando /foto do ${brand.name} ainda não está configurado no Railway.`);
+      return true;
+    }
+    photoSessions.set(key, { step: 'image', brand, startedAt: Date.now() });
+    await replyMessage(remoteJid, `📸 Gerador manual do ${brand.name}. Envie agora a foto principal da matéria.`);
+    return true;
+  }
+
+  const session = photoSessions.get(key);
+  if (!session) return false;
+
+  if (normalized === '/cancelar') {
+    photoSessions.delete(key);
+    await replyMessage(remoteJid, 'Geração cancelada. Digite /foto para começar novamente.');
+    return true;
+  }
+
+  if (Date.now() - session.startedAt > 20 * 60 * 1000) {
+    photoSessions.delete(key);
+    await replyMessage(remoteJid, '⏰ Essa geração expirou. Digite /foto para começar novamente.');
+    return true;
+  }
+
+  try {
+    if (session.step === 'image') {
+      if (!imageMessageContent(message)) {
+        await replyMessage(remoteJid, 'Envie uma foto/imagem para continuar ou digite /cancelar.');
+        return true;
+      }
+      session.image = await imageToPayload(message);
+      session.step = 'title';
+      photoSessions.set(key, session);
+      await replyMessage(remoteJid, 'Foto recebida ✅ Agora envie o título da matéria.');
+      return true;
+    }
+
+    if (session.step === 'title') {
+      if (!text || text.length < 5) {
+        await replyMessage(remoteJid, 'Envie um título com pelo menos 5 caracteres.');
+        return true;
+      }
+      session.title = text.slice(0, 500);
+      if (session.brand.needsCategory) {
+        session.step = 'category';
+        photoSessions.set(key, session);
+        await replyMessage(remoteJid, 'Título salvo ✅ Agora envie a categoria da matéria.');
+        return true;
+      }
+      session.step = 'generating';
+    } else if (session.step === 'category') {
+      if (!text || text.length < 2) {
+        await replyMessage(remoteJid, 'Envie o nome da categoria para continuar.');
+        return true;
+      }
+      session.category = text.slice(0, 120);
+      session.step = 'generating';
+    } else {
+      return true;
+    }
+
+    photoSessions.set(key, session);
+    await replyMessage(remoteJid, `🎨 Gerando a arte padrão do ${session.brand.name}...`);
+    const result = await requestManualPhoto(session);
+    if (!result?.ok) throw new Error(result?.message || 'Falha no gerador.');
+    await sendGeneratedPhotos(remoteJid, result, session.brand);
+    photoSessions.delete(key);
+    await replyMessage(remoteJid, '✅ Geração concluída. Para criar outra, digite /foto.');
+    return true;
+  } catch (error) {
+    logger.error({ error }, 'Erro no comando /foto');
+    photoSessions.delete(key);
+    await replyMessage(remoteJid, `⚠️ Não consegui gerar a arte: ${error?.response?.data?.message || error?.message || 'erro interno'}`);
+    return true;
+  }
 }
 
 async function handlePublishBot(message) {
@@ -220,7 +372,8 @@ export async function startWhatsApp() {
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const message of messages || []) {
-        await handlePublishBot(message);
+        const handled = await handlePhotoBot(message);
+        if (!handled) await handlePublishBot(message);
       }
     });
 

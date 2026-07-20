@@ -21,5 +21,11 @@ export const config = {
   botPublishEnabled: ['1', 'true', 'yes', 'on', 'sim'].includes(String(process.env.BOT_PUBLISH_ENABLED || '').toLowerCase()),
   botPublishApiUrl: (process.env.BOT_PUBLISH_API_URL || '').trim(),
   botPublishToken: (process.env.BOT_PUBLISH_TOKEN || '').trim(),
-  botPublishGroupId: (process.env.BOT_PUBLISH_GROUP_ID || '').trim()
+  botPublishGroupId: (process.env.BOT_PUBLISH_GROUP_ID || '').trim(),
+  photoParanaPopGroupId: (process.env.PHOTO_PARANAPOP_GROUP_ID || process.env.BOT_PUBLISH_GROUP_ID || '').trim(),
+  photoParanaPopApiUrl: (process.env.PHOTO_PARANAPOP_API_URL || '').trim(),
+  photoParanaPopToken: (process.env.PHOTO_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim(),
+  photoTrivoxGroupId: (process.env.PHOTO_TRIVOX_GROUP_ID || '').trim(),
+  photoTrivoxApiUrl: (process.env.PHOTO_TRIVOX_API_URL || '').trim(),
+  photoTrivoxToken: (process.env.PHOTO_TRIVOX_TOKEN || '').trim()
 };
