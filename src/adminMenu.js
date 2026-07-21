@@ -16,7 +16,7 @@ function keyFor(remoteJid, participant) {
 }
 
 function mainMenu() {
-  return `🟢 *ADMIN PARANÁ POP*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
+  return `🟢 *ADMIN PARANÁ POP*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n[7] Fazer imagem padrão do Paraná Pop\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
 }
 
 function postsMenu() {
@@ -97,7 +97,7 @@ export function adminMenuConfigured(config) {
   return Boolean(config.adminMenuEnabled && config.adminMenuApiUrl && config.adminMenuToken && config.adminMenuGroupId);
 }
 
-export async function handleAdminMenu({ message, config, text, remoteJid, participant, reply }) {
+export async function handleAdminMenu({ message, config, text, remoteJid, participant, reply, startPhotoFlow }) {
   if (message?.key?.fromMe || !remoteJid || remoteJid !== config.adminMenuGroupId) return false;
   const value = normalize(text);
   const command = lower(value);
@@ -148,6 +148,15 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
       }
       if (value === '5') { setSession(key, { area: 'settings', step: 'settings_menu' }); await reply(settingsMenu()); return true; }
       if (value === '6') { setSession(key, { area: 'ads', step: 'ads_menu' }); await reply(adsMenu()); return true; }
+      if (value === '7') {
+        if (typeof startPhotoFlow !== 'function') {
+          await reply('⚠️ O gerador de imagem padrão não está disponível neste momento. Você ainda pode usar */foto*.');
+          return true;
+        }
+        sessions.delete(key);
+        await startPhotoFlow();
+        return true;
+      }
       await reply(`Opção inválida.\n\n${mainMenu()}`); return true;
     }
 

@@ -159,6 +159,25 @@ async function sendGeneratedPhotos(jid, result, brand) {
   }
 }
 
+async function startParanaPopPhotoFlow(message) {
+  const remoteJid = message?.key?.remoteJid;
+  const participant = message?.key?.participant || remoteJid;
+  const brand = photoBrandForGroup(remoteJid);
+
+  if (!remoteJid || !brand || brand.key !== 'paranapop') {
+    await replyMessage(remoteJid, '⚠️ A imagem padrão pelo menu está disponível somente no grupo do Paraná Pop.');
+    return;
+  }
+  if (!brand.apiUrl || !brand.token) {
+    await replyMessage(remoteJid, '⚠️ O gerador manual do Paraná Pop ainda não está configurado no Railway.');
+    return;
+  }
+
+  const key = sessionKey(remoteJid, participant);
+  photoSessions.set(key, { step: 'image', brand, startedAt: Date.now() });
+  await replyMessage(remoteJid, '📸 *IMAGEM PADRÃO DO PARANÁ POP*\n\nEnvie agora a foto principal da matéria.\n\nPara cancelar, digite */cancelar*.');
+}
+
 async function handlePhotoBot(message) {
   const remoteJid = message?.key?.remoteJid;
   const participant = message?.key?.participant || remoteJid;
@@ -382,7 +401,8 @@ export async function startWhatsApp() {
           text,
           remoteJid,
           participant,
-          reply: (replyText) => replyMessage(remoteJid, replyText)
+          reply: (replyText) => replyMessage(remoteJid, replyText),
+          startPhotoFlow: () => startParanaPopPhotoFlow(message)
         });
         if (menuHandled) continue;
         const handled = await handlePhotoBot(message);
