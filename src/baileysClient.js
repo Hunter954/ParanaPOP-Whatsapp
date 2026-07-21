@@ -175,7 +175,7 @@ async function startParanaPopPhotoFlow(message) {
 
   const key = sessionKey(remoteJid, participant);
   photoSessions.set(key, { step: 'image', brand, startedAt: Date.now() });
-  await replyMessage(remoteJid, '📸 *IMAGEM PADRÃO DO PARANÁ POP*\n\nEnvie agora a foto principal da matéria.\n\nPara cancelar, digite */cancelar*.');
+  await replyMessage(remoteJid, '📸 *IMAGEM PADRÃO*\n\nParaná Pop: envie agora a foto principal da matéria.\n\nPara cancelar, digite */cancelar*.');
 }
 
 async function handlePhotoBot(message) {

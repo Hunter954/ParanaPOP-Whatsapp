@@ -16,7 +16,7 @@ function keyFor(remoteJid, participant) {
 }
 
 function mainMenu() {
-  return `🟢 *ADMIN PARANÁ POP*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n[7] Fazer imagem padrão do Paraná Pop\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
+  return `🟢 *ADMIN PARANÁ POP*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n[7] Imagem Padrão\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
 }
 
 function postsMenu() {
@@ -41,7 +41,11 @@ function formatPosts(posts = []) {
 
 function formatAds(slots = []) {
   if (!slots.length) return 'Nenhum local de publicidade encontrado.';
-  return slots.map((slot, index) => `[${index + 1}] #${slot.id} ${slot.name} (${slot.key}) — ${slot.is_active ? 'ATIVA' : 'inativa'}${slot.has_content ? '' : ' — vazia'}`).join('\n');
+  return slots.map((slot, index) => {
+    const dimensions = slot.dimensions ? ` — Medida: ${slot.dimensions}` : '';
+    const hint = slot.hint ? ` — ${slot.hint}` : '';
+    return `[${index + 1}] #${slot.id} ${slot.name} (${slot.key}) — ${slot.is_active ? 'ATIVA' : 'inativa'}${slot.has_content ? '' : ' — vazia'}${dimensions}${hint}`;
+  }).join('\n');
 }
 
 function setSession(key, data) {
@@ -265,11 +269,11 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
       const slot = selected(session.slots || [], value);
       if (!slot) { await reply('Local inválido. Digite o número ou ID.'); return true; }
       setSession(key, { ...session, step: 'ad_new_name', slot, draft: {} });
-      await reply(`Local escolhido: *${slot.name}*\n\nDigite um nome para identificar a publicidade.`); return true;
+      await reply(`Local escolhido: *${slot.name}*\n📏 Medida ideal do banner: *${slot.dimensions || 'Consulte o tamanho no painel'}*\n${slot.hint ? `📝 ${slot.hint}\n` : ''}\nDigite um nome para identificar a publicidade.`); return true;
     }
     if (session.step === 'ad_new_name') {
       setSession(key, { ...session, step: 'ad_new_image', draft: { name: value } });
-      await reply('Envie a URL pública da imagem do banner.'); return true;
+      await reply(`Perfeito. Agora envie a *URL pública da imagem do banner*\n\n📏 Tamanho recomendado: *${session.slot?.dimensions || 'Consulte o tamanho no painel'}*\n${session.slot?.hint ? `📝 Local: ${session.slot.hint}\n` : ''}\nExemplo de URL válida: https://site.com/banner.jpg`); return true;
     }
     if (session.step === 'ad_new_image') {
       if (!/^https?:\/\//i.test(value)) { await reply('Envie uma URL começando com http:// ou https://'); return true; }
