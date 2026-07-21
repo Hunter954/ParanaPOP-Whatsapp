@@ -12,6 +12,7 @@ import path from 'path';
 import axios from 'axios';
 import { config } from './config.js';
 import { resolveMedia } from './media.js';
+import { handleAdminMenu } from './adminMenu.js';
 
 const logger = P({ level: process.env.LOG_LEVEL || 'info' });
 
@@ -372,6 +373,18 @@ export async function startWhatsApp() {
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const message of messages || []) {
+        const remoteJid = message?.key?.remoteJid;
+        const participant = message?.key?.participant || remoteJid;
+        const text = textFromMessage(message);
+        const menuHandled = await handleAdminMenu({
+          message,
+          config,
+          text,
+          remoteJid,
+          participant,
+          reply: (replyText) => replyMessage(remoteJid, replyText)
+        });
+        if (menuHandled) continue;
         const handled = await handlePhotoBot(message);
         if (!handled) await handlePublishBot(message);
       }

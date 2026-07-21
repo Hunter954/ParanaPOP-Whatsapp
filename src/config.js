@@ -27,5 +27,9 @@ export const config = {
   photoParanaPopToken: (process.env.PHOTO_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim(),
   photoTrivoxGroupId: (process.env.PHOTO_TRIVOX_GROUP_ID || '').trim(),
   photoTrivoxApiUrl: (process.env.PHOTO_TRIVOX_API_URL || '').trim(),
-  photoTrivoxToken: (process.env.PHOTO_TRIVOX_TOKEN || '').trim()
+  photoTrivoxToken: (process.env.PHOTO_TRIVOX_TOKEN || '').trim(),
+  adminMenuEnabled: ['1', 'true', 'yes', 'on', 'sim'].includes(String(process.env.ADMIN_MENU_ENABLED || process.env.BOT_PUBLISH_ENABLED || '').toLowerCase()),
+  adminMenuGroupId: (process.env.ADMIN_MENU_PARANAPOP_GROUP_ID || process.env.PHOTO_PARANAPOP_GROUP_ID || process.env.BOT_PUBLISH_GROUP_ID || '').trim(),
+  adminMenuApiUrl: (process.env.ADMIN_MENU_PARANAPOP_API_URL || (process.env.BOT_PUBLISH_API_URL || '').replace('/api/whatsapp-bot/publish', '/api/whatsapp-menu/action')).trim(),
+  adminMenuToken: (process.env.ADMIN_MENU_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim()
 };
