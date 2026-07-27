@@ -27,6 +27,8 @@ let reconnectTimer = null;
 const publishSessions = new Map();
 const photoSessions = new Map();
 const videoSessions = new Map();
+const publishedMediaByGroup = new Map();
+let publishedMediaLoaded = false;
 
 function botEnabled() {
   return Boolean(config.botPublishEnabled && config.botPublishApiUrl && config.botPublishToken);
@@ -58,6 +60,116 @@ function sessionKey(remoteJid, participant) {
 async function replyMessage(jid, text) {
   if (!sock || !jid || !text) return;
   await sock.sendMessage(jid, { text });
+}
+
+
+function publishedMediaFile() {
+  return path.join(config.authDir, 'published-media.json');
+}
+
+async function loadPublishedMedia() {
+  if (publishedMediaLoaded) return;
+  publishedMediaLoaded = true;
+  try {
+    const raw = await fs.readFile(publishedMediaFile(), 'utf8');
+    const data = JSON.parse(raw);
+    for (const [groupId, entries] of Object.entries(data || {})) {
+      if (Array.isArray(entries)) publishedMediaByGroup.set(groupId, entries);
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') logger.warn({ error }, 'Não foi possível carregar o histórico de mídias publicadas');
+  }
+}
+
+async function savePublishedMedia() {
+  await fs.mkdir(config.authDir, { recursive: true });
+  const data = Object.fromEntries(publishedMediaByGroup.entries());
+  await fs.writeFile(publishedMediaFile(), JSON.stringify(data, null, 2), 'utf8');
+}
+
+async function rememberPublishedMedia(groupId, result, kind) {
+  const key = result?.key;
+  if (!groupId || !key?.id) return;
+  await loadPublishedMedia();
+  const entries = publishedMediaByGroup.get(groupId) || [];
+  entries.push({
+    key: {
+      remoteJid: key.remoteJid || groupId,
+      fromMe: true,
+      id: key.id,
+      participant: key.participant || sock?.user?.id || undefined
+    },
+    kind,
+    sentAt: Date.now()
+  });
+  publishedMediaByGroup.set(groupId, entries.slice(-500));
+  await savePublishedMedia();
+}
+
+async function sendPublishedMedia(groupId, content, kind) {
+  const result = await sock.sendMessage(groupId, content);
+  await rememberPublishedMedia(groupId, result, kind);
+  return result;
+}
+
+async function senderIsGroupAdmin(groupId, participant) {
+  if (!groupId || !participant) return false;
+  const metadata = await sock.groupMetadata(groupId);
+  const normalized = String(participant).split(':')[0];
+  const member = metadata?.participants?.find((item) => String(item.id).split(':')[0] === normalized);
+  return member?.admin === 'admin' || member?.admin === 'superadmin';
+}
+
+async function clearPublishedMedia(message) {
+  const groupId = message?.key?.remoteJid;
+  const participant = message?.key?.participant || groupId;
+  if (!groupId?.endsWith('@g.us')) return false;
+
+  let isAdmin = false;
+  try {
+    isAdmin = await senderIsGroupAdmin(groupId, participant);
+  } catch (error) {
+    logger.warn({ error, groupId, participant }, 'Falha ao verificar administrador para /clear');
+  }
+  if (!isAdmin) {
+    await replyMessage(groupId, '⛔ O comando /clear pode ser usado somente por administradores do grupo.');
+    return true;
+  }
+
+  await loadPublishedMedia();
+  const entries = publishedMediaByGroup.get(groupId) || [];
+  if (!entries.length) {
+    await replyMessage(groupId, 'ℹ️ Não há fotos ou vídeos registrados pelo bot para apagar neste grupo.');
+    return true;
+  }
+
+  let deleted = 0;
+  let failed = 0;
+  const remaining = [];
+  for (const entry of [...entries].reverse()) {
+    try {
+      await sock.sendMessage(groupId, { delete: entry.key });
+      deleted += 1;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch (error) {
+      failed += 1;
+      remaining.push(entry);
+      logger.warn({ error, messageId: entry?.key?.id }, 'Não foi possível apagar uma mídia publicada');
+    }
+  }
+
+  if (remaining.length) publishedMediaByGroup.set(groupId, remaining.reverse());
+  else publishedMediaByGroup.delete(groupId);
+  await savePublishedMedia();
+
+  const warning = failed
+    ? '\n\nO WhatsApp pode impedir a exclusão de mensagens antigas ou fora da janela permitida.'
+    : '';
+  await replyMessage(
+    groupId,
+    `🧹 Limpeza concluída.\n\n✅ Apagadas: ${deleted}\n⚠️ Não apagadas: ${failed}${warning}`
+  );
+  return true;
 }
 
 function commandAllowed(remoteJid) {
@@ -175,11 +287,11 @@ async function sendGeneratedPhotos(jid, result, brand) {
 
   for (const item of images) {
     const media = await resolveMedia(item.url || item.image_url);
-    await sock.sendMessage(jid, {
+    await sendPublishedMedia(jid, {
       image: media.buffer,
       mimetype: media.mimetype,
       caption: `✅ ${brand.name} — ${item.label || item.size || 'arte gerada'}`
-    });
+    }, 'image');
   }
 }
 
@@ -348,11 +460,11 @@ async function sendGeneratedVideos(jid, result, brand) {
 
   for (const item of videos) {
     const media = await resolveMedia(item.url || item.video_url);
-    await sock.sendMessage(jid, {
+    await sendPublishedMedia(jid, {
       video: media.buffer,
       mimetype: item.mimetype || media.mimetype || 'video/mp4',
       caption: `✅ ${brand.name} — ${item.label || item.size || 'vídeo gerado'}`
-    });
+    }, 'video');
   }
 }
 
@@ -592,6 +704,10 @@ export async function startWhatsApp() {
         const remoteJid = message?.key?.remoteJid;
         const participant = message?.key?.participant || remoteJid;
         const text = textFromMessage(message);
+        if (!message?.key?.fromMe && text.trim().toLowerCase() === '/clear') {
+          const clearHandled = await clearPublishedMedia(message);
+          if (clearHandled) continue;
+        }
         const menuHandled = await handleAdminMenu({
           message,
           config,
@@ -736,11 +852,11 @@ export async function sendImage({ group_id, image_url, image_path, caption }) {
   if (!group_id) throw new Error('group_id ausente.');
 
   const media = await resolveMedia(image_url || image_path);
-  const result = await sock.sendMessage(group_id, {
+  const result = await sendPublishedMedia(group_id, {
     image: media.buffer,
     mimetype: media.mimetype,
     caption: caption || ''
-  });
+  }, 'image');
 
   return { ok: true, message_id: result?.key?.id || null };
 }
