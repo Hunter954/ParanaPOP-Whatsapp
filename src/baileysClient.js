@@ -26,6 +26,7 @@ let lastError = null;
 let reconnectTimer = null;
 const publishSessions = new Map();
 const photoSessions = new Map();
+const videoSessions = new Map();
 
 function botEnabled() {
   return Boolean(config.botPublishEnabled && config.botPublishApiUrl && config.botPublishToken);
@@ -44,6 +45,10 @@ function textFromMessage(message) {
 
 function imageMessageContent(message) {
   return message?.message?.imageMessage || null;
+}
+
+function videoMessageContent(message) {
+  return message?.message?.videoMessage || null;
 }
 
 function sessionKey(remoteJid, participant) {
@@ -73,6 +78,25 @@ async function imageToPayload(message) {
     image_base64: buffer.toString('base64'),
     image_mimetype: mimetype,
     image_filename: `whatsapp-${Date.now()}.${mimetype.includes('png') ? 'png' : mimetype.includes('webp') ? 'webp' : 'jpg'}`
+  };
+}
+
+async function videoToPayload(message) {
+  const buffer = await downloadMediaMessage(
+    message,
+    'buffer',
+    {},
+    { logger, reuploadRequest: sock.updateMediaMessage }
+  );
+  if (buffer.length > config.maxVideoBytes) {
+    throw new Error(`O vídeo excede o limite de ${Math.floor(config.maxVideoBytes / 1_000_000)} MB.`);
+  }
+  const mimetype = videoMessageContent(message)?.mimetype || 'video/mp4';
+  const extension = mimetype.includes('quicktime') ? 'mov' : mimetype.includes('webm') ? 'webm' : 'mp4';
+  return {
+    video_base64: buffer.toString('base64'),
+    video_mimetype: mimetype,
+    video_filename: `whatsapp-${Date.now()}.${extension}`
   };
 }
 
@@ -267,6 +291,179 @@ async function handlePhotoBot(message) {
   }
 }
 
+
+function videoBrandForGroup(remoteJid) {
+  if (config.photoParanaPopGroupId && remoteJid === config.photoParanaPopGroupId) {
+    return {
+      key: 'paranapop',
+      name: 'Paraná Pop',
+      apiUrl: config.videoParanaPopApiUrl,
+      token: config.videoParanaPopToken,
+      needsCategory: true,
+      enabled: true
+    };
+  }
+  if (config.videoTrivoxGroupId && remoteJid === config.videoTrivoxGroupId) {
+    return {
+      key: 'trivox',
+      name: 'Portal Trivox',
+      apiUrl: config.videoTrivoxApiUrl,
+      token: config.videoTrivoxToken,
+      needsCategory: false,
+      enabled: Boolean(config.videoTrivoxApiUrl && config.videoTrivoxToken)
+    };
+  }
+  return null;
+}
+
+async function requestManualVideo(session) {
+  if (!session.brand.apiUrl || !session.brand.token) {
+    throw new Error(`Gerador de vídeo do ${session.brand.name} ainda não está configurado.`);
+  }
+  const response = await axios.post(
+    session.brand.apiUrl,
+    {
+      token: session.brand.token,
+      title: session.title,
+      category: session.category || '',
+      ...session.video
+    },
+    {
+      timeout: 240000,
+      headers: {
+        'X-Bot-Token': session.brand.token,
+        'Content-Type': 'application/json'
+      },
+      maxBodyLength: config.maxVideoBytes * 1.5
+    }
+  );
+  return response.data;
+}
+
+async function sendGeneratedVideos(jid, result, brand) {
+  const videos = Array.isArray(result?.videos)
+    ? result.videos
+    : (result?.video_url ? [{ url: result.video_url, label: 'Vídeo Stories / Reels' }] : []);
+  if (!videos.length) throw new Error(result?.message || 'O gerador não devolveu nenhum vídeo.');
+
+  for (const item of videos) {
+    const media = await resolveMedia(item.url || item.video_url);
+    await sock.sendMessage(jid, {
+      video: media.buffer,
+      mimetype: item.mimetype || media.mimetype || 'video/mp4',
+      caption: `✅ ${brand.name} — ${item.label || item.size || 'vídeo gerado'}`
+    });
+  }
+}
+
+async function startParanaPopVideoFlow(message) {
+  const remoteJid = message?.key?.remoteJid;
+  const participant = message?.key?.participant || remoteJid;
+  const brand = videoBrandForGroup(remoteJid);
+  if (!remoteJid || !brand || brand.key !== 'paranapop') {
+    await replyMessage(remoteJid, '⚠️ O vídeo padrão pelo menu está disponível somente no grupo do Paraná Pop.');
+    return;
+  }
+  if (!brand.apiUrl || !brand.token) {
+    await replyMessage(remoteJid, '⚠️ O gerador de vídeo do Paraná Pop ainda não está configurado no Railway.');
+    return;
+  }
+  const key = sessionKey(remoteJid, participant);
+  videoSessions.set(key, { step: 'video', brand, startedAt: Date.now() });
+  await replyMessage(remoteJid, '🎬 *VÍDEO PADRÃO*\n\nEnvie o vídeo que será usado no Reels/Stories. Depois pedirei o título e a categoria.\n\nPara cancelar, digite */cancelar*.');
+}
+
+async function handleVideoBot(message) {
+  const remoteJid = message?.key?.remoteJid;
+  const participant = message?.key?.participant || remoteJid;
+  if (message?.key?.fromMe || !remoteJid || !remoteJid.endsWith('@g.us')) return false;
+
+  const text = textFromMessage(message);
+  const normalized = text.toLowerCase();
+  const key = sessionKey(remoteJid, participant);
+  const brand = videoBrandForGroup(remoteJid);
+
+  if (normalized === '/video') {
+    if (!brand) return false;
+    if (brand.key === 'trivox' && !brand.enabled) {
+      await replyMessage(remoteJid, '🧱 A estrutura do comando /video do Portal Trivox está pronta. Falta conectar o endpoint e definir os layouts horizontal e vertical.');
+      return true;
+    }
+    if (!brand.apiUrl || !brand.token) {
+      await replyMessage(remoteJid, `⚠️ O gerador de vídeo do ${brand.name} ainda não está configurado no Railway.`);
+      return true;
+    }
+    videoSessions.set(key, { step: 'video', brand, startedAt: Date.now() });
+    await replyMessage(remoteJid, `🎬 Gerador de vídeo do ${brand.name}. Envie agora o vídeo original.`);
+    return true;
+  }
+
+  const session = videoSessions.get(key);
+  if (!session) return false;
+
+  if (normalized === '/cancelar') {
+    videoSessions.delete(key);
+    await replyMessage(remoteJid, 'Geração de vídeo cancelada.');
+    return true;
+  }
+  if (Date.now() - session.startedAt > 30 * 60 * 1000) {
+    videoSessions.delete(key);
+    await replyMessage(remoteJid, '⏰ Essa geração expirou. Inicie novamente pelo menu ou com /video.');
+    return true;
+  }
+
+  try {
+    if (session.step === 'video') {
+      if (!videoMessageContent(message)) {
+        await replyMessage(remoteJid, 'Envie um vídeo para continuar ou digite /cancelar.');
+        return true;
+      }
+      session.video = await videoToPayload(message);
+      session.step = 'title';
+      videoSessions.set(key, session);
+      await replyMessage(remoteJid, 'Vídeo recebido ✅ Agora envie o título da matéria.');
+      return true;
+    }
+    if (session.step === 'title') {
+      if (!text || text.length < 5) {
+        await replyMessage(remoteJid, 'Envie um título com pelo menos 5 caracteres.');
+        return true;
+      }
+      session.title = text.slice(0, 500);
+      if (session.brand.needsCategory) {
+        session.step = 'category';
+        videoSessions.set(key, session);
+        await replyMessage(remoteJid, 'Título salvo ✅ Agora envie a categoria da matéria.');
+        return true;
+      }
+      session.step = 'generating';
+    } else if (session.step === 'category') {
+      if (!text || text.length < 2) {
+        await replyMessage(remoteJid, 'Envie o nome da categoria para continuar.');
+        return true;
+      }
+      session.category = text.slice(0, 120);
+      session.step = 'generating';
+    } else {
+      return true;
+    }
+
+    videoSessions.set(key, session);
+    await replyMessage(remoteJid, `🎞️ Processando o vídeo vertical do ${session.brand.name}...`);
+    const result = await requestManualVideo(session);
+    if (!result?.ok) throw new Error(result?.message || 'Falha no gerador de vídeo.');
+    await sendGeneratedVideos(remoteJid, result, session.brand);
+    videoSessions.delete(key);
+    await replyMessage(remoteJid, '✅ Vídeo concluído e pronto para Reels/Stories.');
+    return true;
+  } catch (error) {
+    logger.error({ error }, 'Erro no comando /video');
+    videoSessions.delete(key);
+    await replyMessage(remoteJid, `⚠️ Não consegui gerar o vídeo: ${error?.response?.data?.message || error?.message || 'erro interno'}`);
+    return true;
+  }
+}
+
 async function handlePublishBot(message) {
   const remoteJid = message?.key?.remoteJid;
   const participant = message?.key?.participant || message?.key?.remoteJid;
@@ -402,9 +599,12 @@ export async function startWhatsApp() {
           remoteJid,
           participant,
           reply: (replyText) => replyMessage(remoteJid, replyText),
-          startPhotoFlow: () => startParanaPopPhotoFlow(message)
+          startPhotoFlow: () => startParanaPopPhotoFlow(message),
+          startVideoFlow: () => startParanaPopVideoFlow(message)
         });
         if (menuHandled) continue;
+        const videoHandled = await handleVideoBot(message);
+        if (videoHandled) continue;
         const handled = await handlePhotoBot(message);
         if (!handled) await handlePublishBot(message);
       }

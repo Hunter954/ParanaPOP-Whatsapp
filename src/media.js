@@ -17,7 +17,10 @@ function guessMimeFromUrl(url) {
   if (clean.endsWith('.png')) return 'image/png';
   if (clean.endsWith('.webp')) return 'image/webp';
   if (clean.endsWith('.jpeg') || clean.endsWith('.jpg')) return 'image/jpeg';
-  return 'image/jpeg';
+  if (clean.endsWith('.mp4') || clean.endsWith('.m4v')) return 'video/mp4';
+  if (clean.endsWith('.mov')) return 'video/quicktime';
+  if (clean.endsWith('.webm')) return 'video/webm';
+  return 'application/octet-stream';
 }
 
 export async function mediaFromUrl(url) {
@@ -35,12 +38,12 @@ export async function mediaFromUrl(url) {
 
   const contentLength = Number.parseInt(response.headers['content-length'] || '0', 10);
   if (contentLength && contentLength > config.maxMediaBytes) {
-    throw new Error(`Imagem excede o limite de ${config.maxMediaBytes} bytes.`);
+    throw new Error(`Mídia excede o limite de ${config.maxMediaBytes} bytes.`);
   }
 
   const buffer = Buffer.from(response.data);
   if (buffer.length > config.maxMediaBytes) {
-    throw new Error(`Imagem excede o limite de ${config.maxMediaBytes} bytes.`);
+    throw new Error(`Mídia excede o limite de ${config.maxMediaBytes} bytes.`);
   }
 
   return {
@@ -54,7 +57,7 @@ export async function mediaFromPath(localPath) {
   const resolved = path.resolve(localPath);
   const buffer = await fs.readFile(resolved);
   if (buffer.length > config.maxMediaBytes) {
-    throw new Error(`Imagem excede o limite de ${config.maxMediaBytes} bytes.`);
+    throw new Error(`Mídia excede o limite de ${config.maxMediaBytes} bytes.`);
   }
   return { buffer, mimetype: guessMimeFromUrl(resolved) };
 }
