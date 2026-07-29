@@ -23,7 +23,7 @@ function guessMimeFromUrl(url) {
   return 'application/octet-stream';
 }
 
-export async function mediaFromUrl(url) {
+export async function mediaFromUrl(url, maxBytes = config.maxMediaBytes) {
   if (!url || !/^https?:\/\//i.test(url)) {
     throw new Error(`URL de mídia inválida: ${url}`);
   }
@@ -31,19 +31,19 @@ export async function mediaFromUrl(url) {
   const response = await axios.get(url, {
     responseType: 'arraybuffer',
     timeout: config.mediaDownloadTimeoutMs,
-    maxContentLength: config.maxMediaBytes,
-    maxBodyLength: config.maxMediaBytes,
+    maxContentLength: maxBytes,
+    maxBodyLength: maxBytes,
     validateStatus: (status) => status >= 200 && status < 300
   });
 
   const contentLength = Number.parseInt(response.headers['content-length'] || '0', 10);
-  if (contentLength && contentLength > config.maxMediaBytes) {
-    throw new Error(`Mídia excede o limite de ${config.maxMediaBytes} bytes.`);
+  if (contentLength && contentLength > maxBytes) {
+    throw new Error(`Mídia excede o limite de ${maxBytes} bytes.`);
   }
 
   const buffer = Buffer.from(response.data);
-  if (buffer.length > config.maxMediaBytes) {
-    throw new Error(`Mídia excede o limite de ${config.maxMediaBytes} bytes.`);
+  if (buffer.length > maxBytes) {
+    throw new Error(`Mídia excede o limite de ${maxBytes} bytes.`);
   }
 
   return {
@@ -52,18 +52,19 @@ export async function mediaFromUrl(url) {
   };
 }
 
-export async function mediaFromPath(localPath) {
+export async function mediaFromPath(localPath, maxBytes = config.maxMediaBytes) {
   if (!localPath) throw new Error('Caminho local da mídia ausente.');
   const resolved = path.resolve(localPath);
   const buffer = await fs.readFile(resolved);
-  if (buffer.length > config.maxMediaBytes) {
-    throw new Error(`Mídia excede o limite de ${config.maxMediaBytes} bytes.`);
+  if (buffer.length > maxBytes) {
+    throw new Error(`Mídia excede o limite de ${maxBytes} bytes.`);
   }
   return { buffer, mimetype: guessMimeFromUrl(resolved) };
 }
 
-export async function resolveMedia(input) {
+export async function resolveMedia(input, options = {}) {
   if (!input) throw new Error('Mídia ausente. Envie image_url ou image_path.');
-  if (/^https?:\/\//i.test(input)) return mediaFromUrl(input);
-  return mediaFromPath(input);
+  const maxBytes = Number.isFinite(options.maxBytes) ? options.maxBytes : config.maxMediaBytes;
+  if (/^https?:\/\//i.test(input)) return mediaFromUrl(input, maxBytes);
+  return mediaFromPath(input, maxBytes);
 }

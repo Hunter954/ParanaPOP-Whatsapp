@@ -446,7 +446,9 @@ async function requestManualVideo(session) {
         'X-Bot-Token': session.brand.token,
         'Content-Type': 'application/json'
       },
-      maxBodyLength: config.maxVideoBytes * 1.5
+      // Base64 aumenta o tamanho do arquivo em aproximadamente 33%.
+      maxBodyLength: Math.ceil(config.maxVideoBytes * 1.5),
+      maxContentLength: config.maxVideoBytes
     }
   );
   return response.data;
@@ -459,7 +461,9 @@ async function sendGeneratedVideos(jid, result, brand) {
   if (!videos.length) throw new Error(result?.message || 'O gerador não devolveu nenhum vídeo.');
 
   for (const item of videos) {
-    const media = await resolveMedia(item.url || item.video_url);
+    const media = await resolveMedia(item.url || item.video_url, {
+      maxBytes: config.maxVideoBytes
+    });
     await sendPublishedMedia(jid, {
       video: media.buffer,
       mimetype: item.mimetype || media.mimetype || 'video/mp4',
