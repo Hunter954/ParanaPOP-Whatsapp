@@ -7,6 +7,15 @@ function intEnv(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function isLegacyTrivoxWordPressUrl(value) {
+  return String(value || '').includes('/wp-json/portaltrivox-whatsapp/');
+}
+
+function usableTrivoxUrl(value) {
+  const url = String(value || '').trim();
+  return url && !isLegacyTrivoxWordPressUrl(url) ? url : '';
+}
+
 export const config = {
   port: intEnv('PORT', 3001),
   serviceToken: process.env.SERVICE_TOKEN || '',
@@ -27,7 +36,11 @@ export const config = {
   photoParanaPopApiUrl: (process.env.PHOTO_PARANAPOP_API_URL || '').trim(),
   photoParanaPopToken: (process.env.PHOTO_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim(),
   photoTrivoxGroupId: (process.env.PHOTO_TRIVOX_GROUP_ID || '').trim(),
-  photoTrivoxApiUrl: (process.env.PHOTO_TRIVOX_API_URL || '').trim(),
+  photoTrivoxApiUrl: (
+    usableTrivoxUrl(process.env.PHOTO_TRIVOX_API_URL) ||
+    (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-trivox-photo') ||
+    (process.env.VIDEO_PARANAPOP_API_URL || '').replace('/generate-video', '/generate-trivox-photo')
+  ).trim(),
   photoTrivoxToken: (process.env.PHOTO_TRIVOX_TOKEN || '').trim(),
   videoParanaPopApiUrl: (process.env.VIDEO_PARANAPOP_API_URL || (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-video')).trim(),
   videoParanaPopToken: (process.env.VIDEO_PARANAPOP_TOKEN || process.env.PHOTO_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim(),
@@ -35,10 +48,10 @@ export const config = {
   // O gerador do Trivox já vive no mesmo backend do Paraná Pop. Se a URL específica
   // não existir, deriva automaticamente do endpoint de vídeo/foto do Paraná Pop.
   videoTrivoxApiUrl: (
-    process.env.VIDEO_TRIVOX_API_URL ||
+    usableTrivoxUrl(process.env.VIDEO_TRIVOX_API_URL) ||
     (process.env.VIDEO_PARANAPOP_API_URL || '').replace('/generate-video', '/generate-trivox-video') ||
     (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-trivox-video') ||
-    (process.env.PHOTO_TRIVOX_API_URL || '').replace('/generate-photo', '/generate-trivox-video')
+    usableTrivoxUrl(process.env.PHOTO_TRIVOX_API_URL).replace('/generate-photo', '/generate-trivox-video')
   ).trim(),
   videoTrivoxToken: (
     process.env.VIDEO_TRIVOX_TOKEN ||
