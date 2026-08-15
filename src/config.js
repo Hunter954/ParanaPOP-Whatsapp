@@ -32,8 +32,22 @@ export const config = {
   videoParanaPopApiUrl: (process.env.VIDEO_PARANAPOP_API_URL || (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-video')).trim(),
   videoParanaPopToken: (process.env.VIDEO_PARANAPOP_TOKEN || process.env.PHOTO_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim(),
   videoTrivoxGroupId: (process.env.VIDEO_TRIVOX_GROUP_ID || process.env.PHOTO_TRIVOX_GROUP_ID || '').trim(),
-  videoTrivoxApiUrl: (process.env.VIDEO_TRIVOX_API_URL || '').trim(),
-  videoTrivoxToken: (process.env.VIDEO_TRIVOX_TOKEN || process.env.PHOTO_TRIVOX_TOKEN || '').trim(),
+  // O gerador do Trivox já vive no mesmo backend do Paraná Pop. Se a URL específica
+  // não existir, deriva automaticamente do endpoint de vídeo/foto do Paraná Pop.
+  videoTrivoxApiUrl: (
+    process.env.VIDEO_TRIVOX_API_URL ||
+    (process.env.VIDEO_PARANAPOP_API_URL || '').replace('/generate-video', '/generate-trivox-video') ||
+    (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-trivox-video') ||
+    (process.env.PHOTO_TRIVOX_API_URL || '').replace('/generate-photo', '/generate-trivox-video')
+  ).trim(),
+  videoTrivoxToken: (
+    process.env.VIDEO_TRIVOX_TOKEN ||
+    process.env.VIDEO_PARANAPOP_TOKEN ||
+    process.env.PHOTO_TRIVOX_TOKEN ||
+    process.env.PHOTO_PARANAPOP_TOKEN ||
+    process.env.BOT_PUBLISH_TOKEN ||
+    ''
+  ).trim(),
   adminMenuEnabled: ['1', 'true', 'yes', 'on', 'sim'].includes(String(process.env.ADMIN_MENU_ENABLED || process.env.BOT_PUBLISH_ENABLED || '').toLowerCase()),
   adminMenuGroupId: (process.env.ADMIN_MENU_PARANAPOP_GROUP_ID || process.env.PHOTO_PARANAPOP_GROUP_ID || process.env.BOT_PUBLISH_GROUP_ID || '').trim(),
   adminMenuApiUrl: (process.env.ADMIN_MENU_PARANAPOP_API_URL || (process.env.BOT_PUBLISH_API_URL || '').replace('/api/whatsapp-bot/publish', '/api/whatsapp-menu/action')).trim(),
