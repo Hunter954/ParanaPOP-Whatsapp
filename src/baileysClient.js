@@ -923,6 +923,71 @@ function buildNewsCaption({ payload, siteName, title, summary, url, instagramDes
   return parts.filter((part) => part !== undefined && part !== null).join('\n').trim();
 }
 
+async function generateStandardNewsImages({ brandKey, title, category, sourceImageUrl, sourceImagePath, onlyFeed = false }) {
+  const normalizedBrand = String(brandKey || '').toLowerCase();
+  const brand = normalizedBrand === 'trivox'
+    ? {
+        key: 'trivox',
+        name: 'Portal Trivox',
+        apiUrl: config.photoTrivoxApiUrl,
+        token: config.photoTrivoxToken,
+        needsCategory: false
+      }
+    : {
+        key: 'paranapop',
+        name: 'Paraná Pop',
+        apiUrl: config.photoParanaPopApiUrl,
+        token: config.photoParanaPopToken,
+        needsCategory: true
+      };
+
+  if (!brand.apiUrl || !brand.token) {
+    throw new Error(`Gerador automático do ${brand.name} não está configurado.`);
+  }
+
+  const media = await resolveMedia(sourceImageUrl || sourceImagePath, {
+    maxBytes: config.maxMediaBytes
+  });
+  const mimetype = media.mimetype || 'image/jpeg';
+  const extension = mimetype.includes('png') ? 'png' : mimetype.includes('webp') ? 'webp' : 'jpg';
+
+  const response = await axios.post(
+    brand.apiUrl,
+    {
+      token: brand.token,
+      title,
+      category: category || '',
+      image_base64: media.buffer.toString('base64'),
+      image_mimetype: mimetype,
+      image_filename: `news-${Date.now()}.${extension}`
+    },
+    {
+      timeout: 90000,
+      headers: {
+        'X-Bot-Token': brand.token,
+        'Content-Type': 'application/json'
+      },
+      maxBodyLength: config.maxMediaBytes + 2_000_000
+    }
+  );
+
+  const result = response.data || {};
+  let images = Array.isArray(result.images)
+    ? result.images
+    : (result.image_url ? [{ url: result.image_url, label: 'Feed Instagram' }] : []);
+
+  if (brand.key === 'trivox' || onlyFeed) {
+    images = images.filter((item) => {
+      const key = String(item?.key || '').toLowerCase();
+      const size = String(item?.size || '').toLowerCase();
+      const label = String(item?.label || '').toLowerCase();
+      return key === 'feed' || size === '1080x1440' || label.includes('feed');
+    }).slice(0, 1);
+  }
+
+  return images;
+}
+
 export async function sendNews(payload = {}) {
   ensureConnected();
 
@@ -941,15 +1006,41 @@ export async function sendNews(payload = {}) {
     payload.caption
   );
   const images = Array.isArray(payload.images) ? payload.images : [];
+  const generateStandardArt = boolValue(payload.generate_standard_art, false);
+  const artBrand = firstFilled(payload.art_brand, payload.brand_key, siteName.toLowerCase().includes('trivox') ? 'trivox' : 'paranapop');
+  const artOnlyFeed = boolValue(payload.art_only_feed, false);
   const caption = firstFilled(
     payload.whatsapp_caption,
     payload.image_caption,
     buildNewsCaption({ payload, siteName, title, summary, url, instagramDescription })
   );
 
+  let preparedImages = images;
+  if (generateStandardArt && images.length) {
+    try {
+      const source = images[0] || {};
+      const mediaUrl = pickUrl(source);
+      if (mediaUrl) {
+        const generatedImages = await generateStandardNewsImages({
+          brandKey: artBrand,
+          title,
+          category: firstFilled(payload.category, payload.categoria, post.category),
+          sourceImageUrl: /^https?:\/\//i.test(mediaUrl) ? mediaUrl : undefined,
+          sourceImagePath: /^https?:\/\//i.test(mediaUrl) ? undefined : mediaUrl,
+          onlyFeed: artOnlyFeed
+        });
+        if (generatedImages.length) {
+          preparedImages = generatedImages;
+        }
+      }
+    } catch (error) {
+      logger.warn({ error, siteName }, 'Falha ao gerar arte padrão da notícia; enviando a imagem original.');
+    }
+  }
+
   const sent = [];
 
-  for (const [index, image] of images.entries()) {
+  for (const [index, image] of preparedImages.entries()) {
     const mediaUrl = pickUrl(image);
     if (!mediaUrl) continue;
 
