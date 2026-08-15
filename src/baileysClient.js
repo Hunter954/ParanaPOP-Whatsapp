@@ -280,9 +280,12 @@ async function requestManualPhoto(session) {
 }
 
 async function sendGeneratedPhotos(jid, result, brand) {
-  const images = Array.isArray(result?.images)
+  const baseImages = Array.isArray(result?.images)
     ? result.images
     : (result?.image_url ? [{ url: result.image_url, label: 'Feed Instagram' }] : []);
+  const images = brand?.key === 'trivox'
+    ? baseImages.filter((item) => (item?.key || '').toLowerCase() === 'feed' || String(item?.size || '') === '1080x1440').slice(0, 1)
+    : baseImages;
   if (!images.length) throw new Error(result?.message || 'O gerador não devolveu nenhuma imagem.');
 
   for (const item of images) {
@@ -422,7 +425,7 @@ function videoBrandForGroup(remoteJid) {
       apiUrl: config.videoTrivoxApiUrl,
       token: config.videoTrivoxToken,
       needsCategory: false,
-      enabled: Boolean(config.videoTrivoxApiUrl && config.videoTrivoxToken)
+      enabled: false
     };
   }
   return null;
@@ -502,7 +505,7 @@ async function handleVideoBot(message) {
   if (normalized === '/video') {
     if (!brand) return false;
     if (brand.key === 'trivox' && !brand.enabled) {
-      await replyMessage(remoteJid, '🧱 A estrutura do comando /video do Portal Trivox está pronta. Falta conectar o endpoint e definir os layouts horizontal e vertical.');
+      await replyMessage(remoteJid, '⏸️ O comando /video do Portal Trivox está desativado temporariamente.');
       return true;
     }
     if (!brand.apiUrl || !brand.token) {
