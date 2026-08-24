@@ -132,3 +132,20 @@ Depois de subir no Railway:
 - Use um número dedicado para reduzir risco operacional.
 - Não apague o volume `/app/auth`, senão precisará escanear QR Code novamente.
 - Não use para disparos em massa. Este serviço é para grupo interno da equipe.
+
+## Portal Trivox no mesmo bot
+
+Para ativar o menu administrativo e a imagem padrão do Portal Trivox no grupo dele, configure:
+
+```env
+ADMIN_MENU_TRIVOX_ENABLED=1
+ADMIN_MENU_TRIVOX_GROUP_ID=1203XXXXXXXXXX@g.us
+ADMIN_MENU_TRIVOX_API_URL=https://SEU-PORTAL-TRIVOX/admin/api/whatsapp-menu/action
+ADMIN_MENU_TRIVOX_TOKEN=mesmo-token-do-WHATSAPP_ADMIN_TOKEN
+
+PHOTO_TRIVOX_GROUP_ID=1203XXXXXXXXXX@g.us
+PHOTO_TRIVOX_API_URL=https://SEU-PORTAL-TRIVOX/admin/api/whatsapp-bot/generate-trivox-photo
+PHOTO_TRIVOX_TOKEN=mesmo-token-do-WHATSAPP_ADMIN_TOKEN
+```
+
+No grupo do Trivox, `menu` abre o **ADMIN PORTAL TRIVOX**. A opção **Imagem Padrão** usa o mesmo fluxo do `/foto`; o `/foto` continua disponível normalmente. O vídeo padrão do Trivox não é exibido no menu nesta versão.

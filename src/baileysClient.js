@@ -298,23 +298,23 @@ async function sendGeneratedPhotos(jid, result, brand) {
   }
 }
 
-async function startParanaPopPhotoFlow(message) {
+async function startPhotoFlowFromMenu(message) {
   const remoteJid = message?.key?.remoteJid;
   const participant = message?.key?.participant || remoteJid;
   const brand = photoBrandForGroup(remoteJid);
 
-  if (!remoteJid || !brand || brand.key !== 'paranapop') {
-    await replyMessage(remoteJid, '⚠️ A imagem padrão pelo menu está disponível somente no grupo do Paraná Pop.');
+  if (!remoteJid || !brand) {
+    await replyMessage(remoteJid, '⚠️ A imagem padrão não está configurada para este grupo.');
     return;
   }
   if (!brand.apiUrl || !brand.token) {
-    await replyMessage(remoteJid, '⚠️ O gerador manual do Paraná Pop ainda não está configurado no Railway.');
+    await replyMessage(remoteJid, `⚠️ O gerador manual do ${brand.name} ainda não está configurado no Railway.`);
     return;
   }
 
   const key = sessionKey(remoteJid, participant);
   photoSessions.set(key, { step: 'image', brand, startedAt: Date.now() });
-  await replyMessage(remoteJid, '📸 *IMAGEM PADRÃO*\n\nParaná Pop: envie agora a foto principal da matéria.\n\nPara cancelar, digite */cancelar*.');
+  await replyMessage(remoteJid, `📸 *IMAGEM PADRÃO*\n\n${brand.name}: envie agora a foto principal da matéria.\n\nPara cancelar, digite */cancelar*.`);
 }
 
 async function handlePhotoBot(message) {
@@ -685,6 +685,25 @@ function scheduleReconnect() {
   }, 3000);
 }
 
+
+function adminMenuConfigForGroup(remoteJid) {
+  if (config.adminMenuGroupId && remoteJid === config.adminMenuGroupId) {
+    return { ...config, adminMenuBrandName: config.adminMenuBrandName || 'Paraná Pop' };
+  }
+  if (config.adminMenuTrivoxEnabled && config.adminMenuTrivoxGroupId && remoteJid === config.adminMenuTrivoxGroupId) {
+    return {
+      ...config,
+      adminMenuEnabled: true,
+      adminMenuGroupId: config.adminMenuTrivoxGroupId,
+      adminMenuApiUrl: config.adminMenuTrivoxApiUrl,
+      adminMenuToken: config.adminMenuTrivoxToken,
+      adminMenuBrandName: 'Portal Trivox',
+      adminMenuHasVideo: false
+    };
+  }
+  return null;
+}
+
 export async function startWhatsApp() {
   if (starting) return;
   starting = true;
@@ -715,16 +734,17 @@ export async function startWhatsApp() {
           const clearHandled = await clearPublishedMedia(message);
           if (clearHandled) continue;
         }
-        const menuHandled = await handleAdminMenu({
+        const scopedMenuConfig = adminMenuConfigForGroup(remoteJid);
+        const menuHandled = scopedMenuConfig ? await handleAdminMenu({
           message,
-          config,
+          config: scopedMenuConfig,
           text,
           remoteJid,
           participant,
           reply: (replyText) => replyMessage(remoteJid, replyText),
-          startPhotoFlow: () => startParanaPopPhotoFlow(message),
-          startVideoFlow: () => startParanaPopVideoFlow(message)
-        });
+          startPhotoFlow: () => startPhotoFlowFromMenu(message),
+          startVideoFlow: scopedMenuConfig.adminMenuBrandName === 'Paraná Pop' ? () => startParanaPopVideoFlow(message) : null
+        }) : false;
         if (menuHandled) continue;
         const videoHandled = await handleVideoBot(message);
         if (videoHandled) continue;

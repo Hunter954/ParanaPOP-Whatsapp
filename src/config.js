@@ -64,5 +64,10 @@ export const config = {
   adminMenuEnabled: ['1', 'true', 'yes', 'on', 'sim'].includes(String(process.env.ADMIN_MENU_ENABLED || process.env.BOT_PUBLISH_ENABLED || '').toLowerCase()),
   adminMenuGroupId: (process.env.ADMIN_MENU_PARANAPOP_GROUP_ID || process.env.PHOTO_PARANAPOP_GROUP_ID || process.env.BOT_PUBLISH_GROUP_ID || '').trim(),
   adminMenuApiUrl: (process.env.ADMIN_MENU_PARANAPOP_API_URL || (process.env.BOT_PUBLISH_API_URL || '').replace('/api/whatsapp-bot/publish', '/api/whatsapp-menu/action')).trim(),
-  adminMenuToken: (process.env.ADMIN_MENU_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim()
+  adminMenuToken: (process.env.ADMIN_MENU_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim(),
+  adminMenuBrandName: 'Paraná Pop',
+  adminMenuTrivoxEnabled: ['1', 'true', 'yes', 'on', 'sim'].includes(String(process.env.ADMIN_MENU_TRIVOX_ENABLED || process.env.ADMIN_MENU_ENABLED || '').toLowerCase()),
+  adminMenuTrivoxGroupId: (process.env.ADMIN_MENU_TRIVOX_GROUP_ID || process.env.PHOTO_TRIVOX_GROUP_ID || '').trim(),
+  adminMenuTrivoxApiUrl: (process.env.ADMIN_MENU_TRIVOX_API_URL || '').trim(),
+  adminMenuTrivoxToken: (process.env.ADMIN_MENU_TRIVOX_TOKEN || process.env.PHOTO_TRIVOX_TOKEN || '').trim()
 };

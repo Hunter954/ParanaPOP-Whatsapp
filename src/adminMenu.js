@@ -15,8 +15,10 @@ function keyFor(remoteJid, participant) {
   return `${remoteJid}:${participant || remoteJid}`;
 }
 
-function mainMenu() {
-  return `🟢 *ADMIN PARANÁ POP*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n[7] Imagem Padrão\n[8] Vídeo Padrão\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
+function mainMenu(config = {}) {
+  const brand = config.adminMenuBrandName || 'Paraná Pop';
+  const videoLine = config.adminMenuHasVideo === false ? '' : '\n[8] Vídeo Padrão';
+  return `🟢 *ADMIN ${brand.toLocaleUpperCase('pt-BR')}*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n[7] Imagem Padrão${videoLine}\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
 }
 
 function postsMenu() {
@@ -109,11 +111,11 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
 
   if (command === 'menu' || command === '/menu') {
     if (!adminMenuConfigured(config)) {
-      await reply('⚠️ O Menu Admin do Paraná Pop ainda não está configurado no Railway.');
+      await reply(`⚠️ O Menu Admin do ${config.adminMenuBrandName || 'Paraná Pop'} ainda não está configurado no Railway.`);
       return true;
     }
     setSession(key, { area: 'main', step: 'main' });
-    await reply(mainMenu());
+    await reply(mainMenu(config));
     return true;
   }
 
@@ -127,7 +129,7 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
   }
   if (command === 'voltar') {
     setSession(key, { area: 'main', step: 'main' });
-    await reply(mainMenu());
+    await reply(mainMenu(config));
     return true;
   }
 
@@ -170,11 +172,11 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
         await startVideoFlow();
         return true;
       }
-      await reply(`Opção inválida.\n\n${mainMenu()}`); return true;
+      await reply(`Opção inválida.\n\n${mainMenu(config)}`); return true;
     }
 
     if (session.step === 'posts_menu') {
-      if (value === '0') { setSession(key, { area: 'main', step: 'main' }); await reply(mainMenu()); return true; }
+      if (value === '0') { setSession(key, { area: 'main', step: 'main' }); await reply(mainMenu(config)); return true; }
       if (value === '1') { setSession(key, { area: 'posts', step: 'new_title', draft: {} }); await reply('🆕 *NOVA MATÉRIA*\n\nDigite o título da matéria.'); return true; }
       if (value === '2') { await beginPostSelection({ config, key, reply, purpose: 'delete' }); return true; }
       if (value === '3') { await beginPostSelection({ config, key, reply, purpose: 'edit' }); return true; }
@@ -260,7 +262,7 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
     }
 
     if (session.step === 'ads_menu') {
-      if (value === '0') { setSession(key, { area: 'main', step: 'main' }); await reply(mainMenu()); return true; }
+      if (value === '0') { setSession(key, { area: 'main', step: 'main' }); await reply(mainMenu(config)); return true; }
       if (value === '1') {
         const slots = (await api(config, 'ads.list')).slots || [];
         setSession(key, { area: 'ads', step: 'ad_new_slot', slots, draft: {} });
@@ -307,7 +309,7 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
     }
 
     if (session.step === 'settings_menu') {
-      if (value === '0') { setSession(key, { area: 'main', step: 'main' }); await reply(mainMenu()); return true; }
+      if (value === '0') { setSession(key, { area: 'main', step: 'main' }); await reply(mainMenu(config)); return true; }
       if (value === '1') {
         const r = await api(config, 'settings.get');
         await reply(`⚙️ *CONFIGURAÇÕES / SEO*\n\nTítulo: ${r.site_title || '-'}\nDescrição: ${r.site_description || '-'}\nURL: ${r.site_url || '-'}\nLogo: ${r.logo_url || '-'}\n\n${settingsMenu()}`); return true;
@@ -324,7 +326,7 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
       await reply(`✅ Configuração atualizada.\n\n${settingsMenu()}`); return true;
     }
 
-    await reply(mainMenu());
+    await reply(mainMenu(config));
     setSession(key, { area: 'main', step: 'main' });
     return true;
   } catch (error) {
