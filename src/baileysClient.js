@@ -425,7 +425,7 @@ function videoBrandForGroup(remoteJid) {
       apiUrl: config.videoTrivoxApiUrl,
       token: config.videoTrivoxToken,
       needsCategory: false,
-      enabled: false
+      enabled: true
     };
   }
   return null;
@@ -444,7 +444,7 @@ async function requestManualVideo(session) {
       ...session.video
     },
     {
-      timeout: 240000,
+      timeout: 600000,
       headers: {
         'X-Bot-Token': session.brand.token,
         'Content-Type': 'application/json'
@@ -475,21 +475,22 @@ async function sendGeneratedVideos(jid, result, brand) {
   }
 }
 
-async function startParanaPopVideoFlow(message) {
+async function startVideoFlowFromMenu(message) {
   const remoteJid = message?.key?.remoteJid;
   const participant = message?.key?.participant || remoteJid;
   const brand = videoBrandForGroup(remoteJid);
-  if (!remoteJid || !brand || brand.key !== 'paranapop') {
-    await replyMessage(remoteJid, '⚠️ O vídeo padrão pelo menu está disponível somente no grupo do Paraná Pop.');
+  if (!remoteJid || !brand || !brand.enabled) {
+    await replyMessage(remoteJid, '⚠️ O gerador de vídeo padrão não está disponível neste grupo.');
     return;
   }
   if (!brand.apiUrl || !brand.token) {
-    await replyMessage(remoteJid, '⚠️ O gerador de vídeo do Paraná Pop ainda não está configurado no Railway.');
+    await replyMessage(remoteJid, `⚠️ O gerador de vídeo do ${brand.name} ainda não está configurado no Railway.`);
     return;
   }
   const key = sessionKey(remoteJid, participant);
   videoSessions.set(key, { step: 'video', brand, startedAt: Date.now() });
-  await replyMessage(remoteJid, '🎬 *VÍDEO PADRÃO*\n\nEnvie o vídeo que será usado no Reels/Stories. Depois pedirei o título e a categoria.\n\nPara cancelar, digite */cancelar*.');
+  const nextStep = brand.needsCategory ? 'Depois pedirei o título e a categoria.' : 'Depois pedirei apenas o título.';
+  await replyMessage(remoteJid, `🎬 *VÍDEO PADRÃO — ${brand.name.toLocaleUpperCase('pt-BR')}*\n\nEnvie o vídeo original. A saída será sempre vertical em *1080x1920*, pronta para Reels. ${nextStep}\n\nPara cancelar, digite */cancelar*.`);
 }
 
 async function handleVideoBot(message) {
@@ -504,8 +505,8 @@ async function handleVideoBot(message) {
 
   if (normalized === '/video') {
     if (!brand) return false;
-    if (brand.key === 'trivox' && !brand.enabled) {
-      await replyMessage(remoteJid, '⏸️ O comando /video do Portal Trivox está desativado temporariamente.');
+    if (!brand.enabled) {
+      await replyMessage(remoteJid, `⏸️ O comando /video do ${brand.name} está desativado.`);
       return true;
     }
     if (!brand.apiUrl || !brand.token) {
@@ -513,7 +514,7 @@ async function handleVideoBot(message) {
       return true;
     }
     videoSessions.set(key, { step: 'video', brand, startedAt: Date.now() });
-    await replyMessage(remoteJid, `🎬 Gerador de vídeo do ${brand.name}. Envie agora o vídeo original.`);
+    await replyMessage(remoteJid, `🎬 Gerador de vídeo do ${brand.name}. Envie agora o vídeo original. A saída será em 1080x1920 para Reels.`);
     return true;
   }
 
@@ -698,7 +699,7 @@ function adminMenuConfigForGroup(remoteJid) {
       adminMenuApiUrl: config.adminMenuTrivoxApiUrl,
       adminMenuToken: config.adminMenuTrivoxToken,
       adminMenuBrandName: 'Portal Trivox',
-      adminMenuHasVideo: false
+      adminMenuHasVideo: true
     };
   }
   return null;
@@ -743,7 +744,7 @@ export async function startWhatsApp() {
           participant,
           reply: (replyText) => replyMessage(remoteJid, replyText),
           startPhotoFlow: () => startPhotoFlowFromMenu(message),
-          startVideoFlow: scopedMenuConfig.adminMenuBrandName === 'Paraná Pop' ? () => startParanaPopVideoFlow(message) : null
+          startVideoFlow: () => startVideoFlowFromMenu(message)
         }) : false;
         if (menuHandled) continue;
         const videoHandled = await handleVideoBot(message);

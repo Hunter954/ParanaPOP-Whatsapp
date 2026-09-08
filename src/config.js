@@ -16,6 +16,14 @@ function usableTrivoxUrl(value) {
   return url && !isLegacyTrivoxWordPressUrl(url) ? url : '';
 }
 
+function trivoxVideoUrlFromPhotoUrl(value) {
+  const url = usableTrivoxUrl(value);
+  if (!url) return '';
+  return url
+    .replace(/\/generate-trivox-photo\/?$/i, '/generate-trivox-video')
+    .replace(/\/generate-photo\/?$/i, '/generate-trivox-video');
+}
+
 export const config = {
   port: intEnv('PORT', 3001),
   serviceToken: process.env.SERVICE_TOKEN || '',
@@ -44,19 +52,19 @@ export const config = {
   photoTrivoxToken: (process.env.PHOTO_TRIVOX_TOKEN || '').trim(),
   videoParanaPopApiUrl: (process.env.VIDEO_PARANAPOP_API_URL || (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-video')).trim(),
   videoParanaPopToken: (process.env.VIDEO_PARANAPOP_TOKEN || process.env.PHOTO_PARANAPOP_TOKEN || process.env.BOT_PUBLISH_TOKEN || '').trim(),
-  videoTrivoxGroupId: (process.env.VIDEO_TRIVOX_GROUP_ID || process.env.PHOTO_TRIVOX_GROUP_ID || '').trim(),
-  // O gerador do Trivox já vive no mesmo backend do Paraná Pop. Se a URL específica
-  // não existir, deriva automaticamente do endpoint de vídeo/foto do Paraná Pop.
+  videoTrivoxGroupId: (process.env.VIDEO_TRIVOX_GROUP_ID || process.env.PHOTO_TRIVOX_GROUP_ID || process.env.ADMIN_MENU_TRIVOX_GROUP_ID || '').trim(),
+  // Prioriza o próprio Portal Trivox: quando a URL explícita de vídeo não existir,
+  // deriva automaticamente da rota de imagem padrão do Trivox.
   videoTrivoxApiUrl: (
     usableTrivoxUrl(process.env.VIDEO_TRIVOX_API_URL) ||
+    trivoxVideoUrlFromPhotoUrl(process.env.PHOTO_TRIVOX_API_URL) ||
     (process.env.VIDEO_PARANAPOP_API_URL || '').replace('/generate-video', '/generate-trivox-video') ||
-    (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-trivox-video') ||
-    usableTrivoxUrl(process.env.PHOTO_TRIVOX_API_URL).replace('/generate-photo', '/generate-trivox-video')
+    (process.env.PHOTO_PARANAPOP_API_URL || '').replace('/generate-photo', '/generate-trivox-video')
   ).trim(),
   videoTrivoxToken: (
     process.env.VIDEO_TRIVOX_TOKEN ||
-    process.env.VIDEO_PARANAPOP_TOKEN ||
     process.env.PHOTO_TRIVOX_TOKEN ||
+    process.env.VIDEO_PARANAPOP_TOKEN ||
     process.env.PHOTO_PARANAPOP_TOKEN ||
     process.env.BOT_PUBLISH_TOKEN ||
     ''
