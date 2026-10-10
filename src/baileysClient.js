@@ -12,7 +12,10 @@ import path from 'path';
 import axios from 'axios';
 import { config } from './config.js';
 import { resolveMedia } from './media.js';
-import { handleAdminMenu } from './adminMenu.js';
+import { handleAdminMenu, hasAdminMenuSession, clearAdminMenuSessions } from './adminMenu.js';
+import { createParanaPopAccess, handleParanaPopAccess, isParanaPopGroup, FREE_LIMIT_MESSAGE } from './paranaPopAccess.js';
+
+const paranaPopAccess = createParanaPopAccess(config);
 
 const logger = P({ level: process.env.LOG_LEVEL || 'info' });
 
@@ -107,6 +110,9 @@ async function rememberPublishedMedia(groupId, result, kind) {
 }
 
 async function sendPublishedMedia(groupId, content, kind) {
+  if (paranaPopAccess.isBlocked(groupId)) {
+    return sock.sendMessage(groupId, { text: FREE_LIMIT_MESSAGE });
+  }
   const result = await sock.sendMessage(groupId, content);
   await rememberPublishedMedia(groupId, result, kind);
   return result;
@@ -115,8 +121,11 @@ async function sendPublishedMedia(groupId, content, kind) {
 async function senderIsGroupAdmin(groupId, participant) {
   if (!groupId || !participant) return false;
   const metadata = await sock.groupMetadata(groupId);
-  const normalized = String(participant).split(':')[0];
-  const member = metadata?.participants?.find((item) => String(item.id).split(':')[0] === normalized);
+  const normalizeJid = (value) => String(value || '').replace(/:\d+(?=@)/, '');
+  const normalized = normalizeJid(participant);
+  const member = metadata?.participants?.find((item) =>
+    [item.id, item.lid, item.phoneNumber].some((id) => id && normalizeJid(id) === normalized)
+  );
   return member?.admin === 'admin' || member?.admin === 'superadmin';
 }
 
@@ -710,6 +719,7 @@ export async function startWhatsApp() {
   starting = true;
 
   try {
+    await paranaPopAccess.load();
     await fs.mkdir(config.authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -731,6 +741,29 @@ export async function startWhatsApp() {
         const remoteJid = message?.key?.remoteJid;
         const participant = message?.key?.participant || remoteJid;
         const text = textFromMessage(message);
+        try {
+          const key = sessionKey(remoteJid, participant);
+          const accessHandled = await handleParanaPopAccess({
+            access: paranaPopAccess, config, message, text,
+            hasSession: hasAdminMenuSession(remoteJid, participant) || publishSessions.has(key) || photoSessions.has(key) || videoSessions.has(key),
+            isAdmin: () => senderIsGroupAdmin(remoteJid, participant),
+            reply: (value) => replyMessage(remoteJid, value),
+            clearSessions: () => {
+              const groups = [config.botPublishGroupId, config.photoParanaPopGroupId, config.adminMenuGroupId]
+                .filter((id) => isParanaPopGroup(config, id));
+              clearAdminMenuSessions(groups);
+              for (const sessions of [publishSessions, photoSessions, videoSessions]) {
+                for (const sessionId of sessions.keys()) {
+                  if (groups.some((id) => sessionId.startsWith(`${id}:`))) sessions.delete(sessionId);
+                }
+              }
+            }
+          });
+          if (accessHandled) continue;
+        } catch (error) {
+          logger.error({ error, remoteJid }, 'Falha ao verificar ou salvar o acesso do Paraná Pop');
+          continue;
+        }
         if (!message?.key?.fromMe && text.trim().toLowerCase() === '/clear') {
           const clearHandled = await clearPublishedMedia(message);
           if (clearHandled) continue;
@@ -798,6 +831,7 @@ export function getStatus() {
     status: connected ? 'Conectado' : (qrText ? 'Aguardando QR Code' : 'Desconectado'),
     state: connected ? 'connected' : (qrText ? 'qr' : 'disconnected'),
     connected,
+    paranapop_blocked: paranaPopAccess.isBlocked(config.adminMenuGroupId || config.photoParanaPopGroupId || config.botPublishGroupId),
     has_qr: Boolean(qrText),
     qr: qrText,
     qr_data_url: qrDataUrl,
@@ -1014,6 +1048,12 @@ export async function sendNews(payload = {}) {
 
   const groupId = payload.group_id || payload.groupId || payload.to;
   if (!groupId) throw new Error('group_id ausente.');
+
+  await paranaPopAccess.load();
+  if (paranaPopAccess.isBlocked(groupId)) {
+    const sentText = await sendMessage({ group_id: groupId, message: FREE_LIMIT_MESSAGE });
+    return { ok: true, blocked: true, message: FREE_LIMIT_MESSAGE, sent_images: [], sent_text: sentText };
+  }
 
   const post = payload.post || {};
   const siteName = firstFilled(payload.portal_name, payload.site_name, payload.brand_name, post.portal_name, post.site_name, 'Paraná Pop');

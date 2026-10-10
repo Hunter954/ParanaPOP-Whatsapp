@@ -99,6 +99,16 @@ async function beginPostSelection({ config, key, reply, purpose, query = '' }) {
   await reply(`${purpose === 'delete' ? '🗑️ Escolha a matéria para excluir' : '✏️ Escolha a matéria para editar'}:\n\n${formatPosts(posts)}\n\nDigite o número, o ID ou outro trecho do título.`);
 }
 
+export function hasAdminMenuSession(remoteJid, participant) {
+  return Boolean(getSession(keyFor(remoteJid, participant)));
+}
+
+export function clearAdminMenuSessions(groupIds) {
+  for (const key of sessions.keys()) {
+    if (groupIds.some((id) => key.startsWith(`${id}:`))) sessions.delete(key);
+  }
+}
+
 export function adminMenuConfigured(config) {
   return Boolean(config.adminMenuEnabled && config.adminMenuApiUrl && config.adminMenuToken && config.adminMenuGroupId);
 }

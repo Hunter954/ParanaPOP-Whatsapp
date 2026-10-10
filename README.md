@@ -149,3 +149,23 @@ PHOTO_TRIVOX_TOKEN=mesmo-token-do-WHATSAPP_ADMIN_TOKEN
 ```
 
 No grupo do Trivox, `menu` abre o **ADMIN PORTAL TRIVOX**. A opção **Imagem Padrão** usa o mesmo fluxo do `/foto`; o `/foto` continua disponível normalmente. O vídeo padrão do Trivox não é exibido no menu nesta versão.
+
+## Bloqueio do acesso gratuito — somente Paraná Pop
+
+O Paraná Pop começa bloqueado. Tentativas de usar menu, opções numéricas,
+`/foto`, `/video`, `/publicar` e outras ferramentas recebem o aviso:
+
+> Você atingiu o limite de acesso gratuito às ferramentas do Paraná Pop. Para saber mais e liberar o acesso, entre em contato com o fornecedor.
+
+No grupo configurado do Paraná Pop, administradores podem usar `/unblock` para
+liberar ou `/block` para bloquear novamente. A própria conta conectada do bot
+também pode enviar esses comandos. O estado fica salvo em
+`AUTH_DIR/paranapop-access.json` no volume persistente e não muda após redeploy.
+As sessões em andamento são encerradas ao alterar o bloqueio.
+
+Enquanto bloqueado, `/send-news` envia somente o aviso ao grupo do Paraná Pop,
+sem artes ou texto da matéria. Os grupos configurados do Portal Trivox ficam
+livres e têm prioridade caso algum ID tenha sido configurado nos dois portais.
+Conversas comuns no grupo não geram avisos automáticos.
+
+Testes (Node 22+): `node --experimental-test-module-mocks --test test/*.test.js`
