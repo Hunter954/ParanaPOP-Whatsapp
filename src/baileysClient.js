@@ -11,13 +11,14 @@ import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
 import { config } from './config.js';
-import { resolveMedia } from './media.js';
+import { resolveMedia, saveMediaStream, postMedia, removeTemp, tempMediaStats } from './media.js';
+import { SessionStore, mediaQueue } from './resourceLimits.js';
 import { handleAdminMenu, hasAdminMenuSession, clearAdminMenuSessions } from './adminMenu.js';
 import { createParanaPopAccess, handleParanaPopAccess, isParanaPopGroup, FREE_LIMIT_MESSAGE } from './paranaPopAccess.js';
 
 const paranaPopAccess = createParanaPopAccess(config);
 
-const logger = P({ level: process.env.LOG_LEVEL || 'info' });
+const logger = P({ level: process.env.LOG_LEVEL || 'warn', serializers: { error: error => ({ name: error?.name, message: error?.message, status: error?.response?.status }) } });
 
 let sock = null;
 let qrText = null;
@@ -27,9 +28,9 @@ let starting = false;
 let lastConnectionUpdate = null;
 let lastError = null;
 let reconnectTimer = null;
-const publishSessions = new Map();
-const photoSessions = new Map();
-const videoSessions = new Map();
+const publishSessions = new SessionStore();
+const photoSessions = new SessionStore({ ttlMs: 20 * 60_000 });
+const videoSessions = new SessionStore();
 const publishedMediaByGroup = new Map();
 let publishedMediaLoaded = false;
 
@@ -187,60 +188,25 @@ function commandAllowed(remoteJid) {
   return true;
 }
 
-async function imageToPayload(message) {
-  const buffer = await downloadMediaMessage(
-    message,
-    'buffer',
-    {},
-    { logger, reuploadRequest: sock.updateMediaMessage }
-  );
-  const mimetype = imageMessageContent(message)?.mimetype || 'image/jpeg';
-  return {
-    image_base64: buffer.toString('base64'),
-    image_mimetype: mimetype,
-    image_filename: `whatsapp-${Date.now()}.${mimetype.includes('png') ? 'png' : mimetype.includes('webp') ? 'webp' : 'jpg'}`
-  };
+async function downloadIncoming(message, kind) {
+  const metadata = kind === 'video' ? videoMessageContent(message) : imageMessageContent(message);
+  const limit = kind === 'video' ? config.maxVideoBytes : config.maxMediaBytes;
+  if (Number(metadata?.fileLength || 0) > limit) throw new Error('Mídia excede o limite de tamanho.');
+  const stream = await downloadMediaMessage(message, 'stream', {}, { logger, reuploadRequest: sock.updateMediaMessage });
+  const media = await saveMediaStream(stream, limit, metadata?.mimetype || (kind === 'video' ? 'video/mp4' : 'image/jpeg'));
+  const extension = kind === 'video' ? 'mp4' : media.mimetype.includes('png') ? 'png' : media.mimetype.includes('webp') ? 'webp' : 'jpg';
+  media.filename = `whatsapp-${Date.now()}.${extension}`;
+  return media;
 }
 
-async function videoToPayload(message) {
-  const buffer = await downloadMediaMessage(
-    message,
-    'buffer',
-    {},
-    { logger, reuploadRequest: sock.updateMediaMessage }
-  );
-  if (buffer.length > config.maxVideoBytes) {
-    throw new Error(`O vídeo excede o limite de ${Math.floor(config.maxVideoBytes / 1_000_000)} MB.`);
-  }
-  const mimetype = videoMessageContent(message)?.mimetype || 'video/mp4';
-  const extension = mimetype.includes('quicktime') ? 'mov' : mimetype.includes('webm') ? 'webm' : 'mp4';
-  return {
-    video_base64: buffer.toString('base64'),
-    video_mimetype: mimetype,
-    video_filename: `whatsapp-${Date.now()}.${extension}`
-  };
-}
+async function imageToPayload(message) { return downloadIncoming(message, 'image'); }
+async function videoToPayload(message) { return downloadIncoming(message, 'video'); }
 
 async function publishToSite(session) {
-  const response = await axios.post(
-    config.botPublishApiUrl,
-    {
-      token: config.botPublishToken,
-      title: session.title,
-      content: session.content,
-      ...session.image
-    },
-    {
-      timeout: 60000,
-      headers: {
-        'X-Bot-Token': config.botPublishToken,
-        'Content-Type': 'application/json'
-      },
-      maxBodyLength: config.maxMediaBytes + 2_000_000
-    }
-  );
-  return response.data;
+  return postMedia(config.botPublishApiUrl, config.botPublishToken,
+    { title: session.title, content: session.content }, session.image, 'image', 60_000);
 }
+
 
 function photoBrandForGroup(remoteJid) {
   if (config.photoParanaPopGroupId && remoteJid === config.photoParanaPopGroupId) {
@@ -265,27 +231,9 @@ function photoBrandForGroup(remoteJid) {
 }
 
 async function requestManualPhoto(session) {
-  if (!session.brand.apiUrl || !session.brand.token) {
-    throw new Error(`Gerador manual do ${session.brand.name} não está configurado no Railway.`);
-  }
-  const response = await axios.post(
-    session.brand.apiUrl,
-    {
-      token: session.brand.token,
-      title: session.title,
-      category: session.category || '',
-      ...session.image
-    },
-    {
-      timeout: 90000,
-      headers: {
-        'X-Bot-Token': session.brand.token,
-        'Content-Type': 'application/json'
-      },
-      maxBodyLength: config.maxMediaBytes + 2_000_000
-    }
-  );
-  return response.data;
+  if (!session.brand.apiUrl || !session.brand.token) throw new Error(`Gerador manual do ${session.brand.name} não está configurado.`);
+  return postMedia(session.brand.apiUrl, session.brand.token,
+    { title: session.title, category: session.category || '' }, session.image, 'image');
 }
 
 async function sendGeneratedPhotos(jid, result, brand) {
@@ -299,11 +247,11 @@ async function sendGeneratedPhotos(jid, result, brand) {
 
   for (const item of images) {
     const media = await resolveMedia(item.url || item.image_url);
-    await sendPublishedMedia(jid, {
-      image: media.buffer,
+    try { await sendPublishedMedia(jid, {
+      image: { url: media.path },
       mimetype: media.mimetype,
       caption: `✅ ${brand.name} — ${item.label || item.size || 'arte gerada'}`
-    }, 'image');
+    }, 'image'); } finally { await removeTemp(media.path); }
   }
 }
 
@@ -441,29 +389,9 @@ function videoBrandForGroup(remoteJid) {
 }
 
 async function requestManualVideo(session) {
-  if (!session.brand.apiUrl || !session.brand.token) {
-    throw new Error(`Gerador de vídeo do ${session.brand.name} ainda não está configurado.`);
-  }
-  const response = await axios.post(
-    session.brand.apiUrl,
-    {
-      token: session.brand.token,
-      title: session.title,
-      category: session.category || '',
-      ...session.video
-    },
-    {
-      timeout: 600000,
-      headers: {
-        'X-Bot-Token': session.brand.token,
-        'Content-Type': 'application/json'
-      },
-      // Base64 aumenta o tamanho do arquivo em aproximadamente 33%.
-      maxBodyLength: Math.ceil(config.maxVideoBytes * 1.5),
-      maxContentLength: config.maxVideoBytes
-    }
-  );
-  return response.data;
+  if (!session.brand.apiUrl || !session.brand.token) throw new Error(`Gerador de vídeo do ${session.brand.name} não está configurado.`);
+  return postMedia(session.brand.apiUrl, session.brand.token,
+    { title: session.title, category: session.category || '' }, session.video, 'video', 600_000);
 }
 
 async function sendGeneratedVideos(jid, result, brand) {
@@ -476,11 +404,11 @@ async function sendGeneratedVideos(jid, result, brand) {
     const media = await resolveMedia(item.url || item.video_url, {
       maxBytes: config.maxVideoBytes
     });
-    await sendPublishedMedia(jid, {
-      video: media.buffer,
+    try { await sendPublishedMedia(jid, {
+      video: { url: media.path },
       mimetype: item.mimetype || media.mimetype || 'video/mp4',
       caption: `✅ ${brand.name} — ${item.label || item.size || 'vídeo gerado'}`
-    }, 'video');
+    }, 'video'); } finally { await removeTemp(media.path); }
   }
 }
 
@@ -715,7 +643,7 @@ function adminMenuConfigForGroup(remoteJid) {
 }
 
 export async function startWhatsApp() {
-  if (starting) return;
+  if (starting || connected) return;
   starting = true;
 
   try {
@@ -724,7 +652,13 @@ export async function startWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
     const { version } = await fetchLatestBaileysVersion();
 
-    sock = makeWASocket({
+    const oldSocket = sock;
+    sock = null;
+    if (oldSocket) {
+      for (const event of ['messages.upsert', 'connection.update', 'creds.update']) oldSocket.ev.removeAllListeners?.(event);
+      oldSocket.end?.(new Error('Replacing disconnected socket'));
+    }
+    const socket = makeWASocket({
       version,
       logger,
       printQRInTerminal: false,
@@ -734,9 +668,12 @@ export async function startWhatsApp() {
       markOnlineOnConnect: false
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    sock = socket;
+    socket.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
+    socket.ev.on('messages.upsert', async ({ messages }) => {
+      if (sock !== socket) return;
+      try { await mediaQueue.run(async () => {
       for (const message of messages || []) {
         const remoteJid = message?.key?.remoteJid;
         const participant = message?.key?.participant || remoteJid;
@@ -785,9 +722,11 @@ export async function startWhatsApp() {
         const handled = await handlePhotoBot(message);
         if (!handled) await handlePublishBot(message);
       }
+      }); } catch (error) { logger.warn({ message: error.message }, 'Fila de mensagens indisponível'); }
     });
 
-    sock.ev.on('connection.update', async (update) => {
+    socket.ev.on('connection.update', async (update) => {
+      if (sock !== socket) return;
       lastConnectionUpdate = update;
       const { connection, lastDisconnect, qr } = update;
 
@@ -831,6 +770,9 @@ export function getStatus() {
     status: connected ? 'Conectado' : (qrText ? 'Aguardando QR Code' : 'Desconectado'),
     state: connected ? 'connected' : (qrText ? 'qr' : 'disconnected'),
     connected,
+    resources: { memory: process.memoryUsage(), pending_jobs: mediaQueue.pending.length,
+      processing: mediaQueue.active, sessions: publishSessions.size + photoSessions.size + videoSessions.size,
+      temporary_media: tempMediaStats() },
     paranapop_blocked: paranaPopAccess.isBlocked(config.adminMenuGroupId || config.photoParanaPopGroupId || config.botPublishGroupId),
     has_qr: Boolean(qrText),
     qr: qrText,
@@ -909,19 +851,22 @@ export async function sendMessage({ group_id, message }) {
   return { ok: true, message_id: result?.key?.id || null };
 }
 
-export async function sendImage({ group_id, image_url, image_path, caption }) {
+async function sendImageNow({ group_id, image_url, image_path, caption }) {
   ensureConnected();
   if (!group_id) throw new Error('group_id ausente.');
 
   const media = await resolveMedia(image_url || image_path);
-  const result = await sendPublishedMedia(group_id, {
-    image: media.buffer,
+  try { const result = await sendPublishedMedia(group_id, {
+    image: { url: media.path },
     mimetype: media.mimetype,
     caption: caption || ''
   }, 'image');
 
   return { ok: true, message_id: result?.key?.id || null };
+  } finally { await removeTemp(media.path); }
 }
+
+export function sendImage(payload) { return mediaQueue.run(() => sendImageNow(payload)); }
 
 function pickUrl(item) {
   return item?.url || item?.image_url || item?.public_url || item?.path || item?.image_path || null;
@@ -1003,30 +948,13 @@ async function generateStandardNewsImages({ brandKey, title, category, sourceIma
   const media = await resolveMedia(sourceImageUrl || sourceImagePath, {
     maxBytes: config.maxMediaBytes
   });
-  const mimetype = media.mimetype || 'image/jpeg';
-  const extension = mimetype.includes('png') ? 'png' : mimetype.includes('webp') ? 'webp' : 'jpg';
-
-  const response = await axios.post(
-    brand.apiUrl,
-    {
-      token: brand.token,
-      title,
-      category: category || '',
-      image_base64: media.buffer.toString('base64'),
-      image_mimetype: mimetype,
-      image_filename: `news-${Date.now()}.${extension}`
-    },
-    {
-      timeout: 90000,
-      headers: {
-        'X-Bot-Token': brand.token,
-        'Content-Type': 'application/json'
-      },
-      maxBodyLength: config.maxMediaBytes + 2_000_000
-    }
-  );
-
-  const result = response.data || {};
+  let result;
+  try {
+    result = await postMedia(brand.apiUrl, brand.token,
+      { title, category: category || '', formats: onlyFeed ? 'feed' : '' }, media, 'image');
+  } finally {
+    await removeTemp(media.path);
+  }
   let images = Array.isArray(result.images)
     ? result.images
     : (result.image_url ? [{ url: result.image_url, label: 'Feed Instagram' }] : []);
@@ -1043,7 +971,7 @@ async function generateStandardNewsImages({ brandKey, title, category, sourceIma
   return images;
 }
 
-export async function sendNews(payload = {}) {
+async function sendNewsNow(payload = {}) {
   ensureConnected();
 
   const groupId = payload.group_id || payload.groupId || payload.to;
@@ -1107,7 +1035,7 @@ export async function sendNews(payload = {}) {
 
     const formatLabel = labelForFormat(image.format || image.type || image.name);
     const imageCaption = index === 0 ? caption : firstFilled(image.caption, `Arte ${formatLabel} - ${title}`);
-    const result = await sendImage({
+    const result = await sendImageNow({
       group_id: groupId,
       image_url: /^https?:\/\//i.test(mediaUrl) ? mediaUrl : undefined,
       image_path: /^https?:\/\//i.test(mediaUrl) ? undefined : mediaUrl,
@@ -1134,3 +1062,5 @@ export async function sendNews(payload = {}) {
     sent_text: textResult
   };
 }
+
+export function sendNews(payload = {}) { return mediaQueue.run(() => sendNewsNow(payload)); }

@@ -1,6 +1,7 @@
 import axios from 'axios';
+import { SessionStore } from './resourceLimits.js';
 
-const sessions = new Map();
+const sessions = new SessionStore();
 const SESSION_TTL = 30 * 60 * 1000;
 
 function normalize(value) {

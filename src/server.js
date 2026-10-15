@@ -107,8 +107,9 @@ app.post('/send-news', requireServiceToken, asyncRoute(async (req, res) => {
 }));
 
 app.use((error, req, res, next) => {
-  console.error(error);
-  res.status(500).json({
+  console.error({ name: error?.name, message: error?.message });
+  if (error?.code === "RESOURCE_QUEUE_FULL") res.setHeader("Retry-After", "10");
+  res.status(error?.code === "RESOURCE_QUEUE_FULL" ? 429 : 500).json({
     ok: false,
     error: error?.name || 'Error',
     message: error?.message || 'Erro interno no serviço WhatsApp.'
