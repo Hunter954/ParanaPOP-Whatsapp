@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import { config } from './config.js';
@@ -11,6 +12,7 @@ import {
   sendImage,
   sendMessage,
   sendNews,
+  sendRecoveryCode,
   startWhatsApp
 } from './baileysClient.js';
 
@@ -96,6 +98,38 @@ app.post('/logout', requireServiceToken, asyncRoute(async (req, res) => {
 
 app.post('/send-message', requireServiceToken, asyncRoute(async (req, res) => {
   res.json(await sendMessage(req.body));
+}));
+
+const recoveryPortals = new Map([
+  ['paranapop', 'Paraná POP'],
+  ['trivox', 'Portal Trivox'],
+  ['fronteira360', 'Fronteira 360 Oeste'],
+  ['paranaatual', 'Paraná Atual'],
+  ['euteapresentofoz', 'Eu Te Apresento Foz'],
+  ['foz1000grau', 'Foz1000Grau'],
+  ['sti1000grau', 'STI1000Grau']
+]);
+
+const digest = value => createHash('sha256').update(value).digest();
+
+app.post('/send-recovery-code', asyncRoute(async (req, res) => {
+  const { portal, phone, code } = req.body || {};
+  const name = recoveryPortals.get(portal);
+  const token = name && process.env[`RECOVERY_TOKEN_${portal.toUpperCase()}`];
+  const authorization = req.get('Authorization') || '';
+  if (!token || !timingSafeEqual(digest(authorization), digest(`Bearer ${token}`))) {
+    return res.sendStatus(401);
+  }
+  if (typeof phone !== 'string' || !/^\+[1-9][0-9]{7,14}$/.test(phone) ||
+      typeof code !== 'string' || !/^[0-9]{6}$/.test(code)) {
+    return res.sendStatus(400);
+  }
+  try {
+    const accepted = await sendRecoveryCode({ phone, code, name });
+    return res.status(accepted ? 202 : 502).json({ accepted });
+  } catch {
+    return res.status(503).json({ accepted: false });
+  }
 }));
 
 app.post('/send-image', requireServiceToken, asyncRoute(async (req, res) => {

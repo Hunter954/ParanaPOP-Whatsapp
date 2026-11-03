@@ -851,6 +851,23 @@ export async function sendMessage({ group_id, message }) {
   return { ok: true, message_id: result?.key?.id || null };
 }
 
+export async function sendRecoveryCode({ phone, code, name }) {
+  ensureConnected();
+  const socket = sock;
+  const contacts = await socket.onWhatsApp(phone);
+  const contact = contacts?.find(result => result.exists && /^[0-9]+@s\.whatsapp\.net$/.test(result.jid));
+  if (!contact || socket !== sock) return false;
+
+  const text = [
+    `*${name} | Recuperação de senha*`,
+    `Seu código é *${code}*.`,
+    'Digite o código na tela de recuperação do painel administrativo. Ele expira em 5 minutos.',
+    'Se você não pediu a recuperação, ignore esta mensagem.'
+  ].join('\n\n');
+  const result = await socket.sendMessage(contact.jid, { text });
+  return Boolean(result?.key?.id);
+}
+
 async function sendImageNow({ group_id, image_url, image_path, caption }) {
   ensureConnected();
   if (!group_id) throw new Error('group_id ausente.');
