@@ -1,3 +1,4 @@
+import { archiveSession } from './sessionStore.js';
 import makeWASocket, {
   DisconnectReason,
   downloadMediaMessage,
@@ -648,8 +649,8 @@ export async function startWhatsApp() {
 
   try {
     await paranaPopAccess.load();
-    await fs.mkdir(config.authDir, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
+    await fs.mkdir(config.sessionDir, { recursive: true });
+    const { state, saveCreds } = await useMultiFileAuthState(config.sessionDir);
     const { version } = await fetchLatestBaileysVersion();
 
     const oldSocket = sock;
@@ -755,7 +756,10 @@ export async function startWhatsApp() {
         if (statusCode !== DisconnectReason.loggedOut) {
           scheduleReconnect();
         } else {
-          logger.warn('Sessão deslogada. Será necessário escanear novo QR Code.');
+          socket.ev.removeAllListeners?.('creds.update');
+          await archiveSession();
+          logger.warn('Sessão expirada preservada. Gerando novo QR Code.');
+          scheduleReconnect();
         }
       }
     });
@@ -810,7 +814,7 @@ export async function logoutWhatsApp() {
   connected = false;
   await setQr(null);
   try {
-    await fs.rm(config.authDir, { recursive: true, force: true });
+    await archiveSession();
   } catch (error) {
     logger.warn({ error }, 'Falha ao remover diretório de auth');
   }
@@ -849,6 +853,23 @@ export async function sendMessage({ group_id, message }) {
 
   const result = await sock.sendMessage(group_id, { text: message });
   return { ok: true, message_id: result?.key?.id || null };
+}
+
+export async function sendRecoveryCode({ phone, code, name }) {
+  ensureConnected();
+  const socket = sock;
+  const contacts = await socket.onWhatsApp(phone);
+  const contact = contacts?.find(result => result.exists && /^[0-9]+@s\.whatsapp\.net$/.test(result.jid));
+  if (!contact || socket !== sock) return false;
+
+  const text = [
+    `*${name} | Recuperação de senha*`,
+    `Seu código é *${code}*.`,
+    'Digite o código na tela de recuperação do painel administrativo. Ele expira em 5 minutos.',
+    'Se você não pediu a recuperação, ignore esta mensagem.'
+  ].join('\n\n');
+  const result = await socket.sendMessage(contact.jid, { text });
+  return Boolean(result?.key?.id);
 }
 
 async function sendImageNow({ group_id, image_url, image_path, caption }) {
