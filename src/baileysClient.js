@@ -1,3 +1,4 @@
+import { archiveSession } from './sessionStore.js';
 import makeWASocket, {
   DisconnectReason,
   downloadMediaMessage,
@@ -648,8 +649,8 @@ export async function startWhatsApp() {
 
   try {
     await paranaPopAccess.load();
-    await fs.mkdir(config.authDir, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
+    await fs.mkdir(config.sessionDir, { recursive: true });
+    const { state, saveCreds } = await useMultiFileAuthState(config.sessionDir);
     const { version } = await fetchLatestBaileysVersion();
 
     const oldSocket = sock;
@@ -755,7 +756,10 @@ export async function startWhatsApp() {
         if (statusCode !== DisconnectReason.loggedOut) {
           scheduleReconnect();
         } else {
-          logger.warn('Sessão deslogada. Será necessário escanear novo QR Code.');
+          socket.ev.removeAllListeners?.('creds.update');
+          await archiveSession();
+          logger.warn('Sessão expirada preservada. Gerando novo QR Code.');
+          scheduleReconnect();
         }
       }
     });
@@ -810,7 +814,7 @@ export async function logoutWhatsApp() {
   connected = false;
   await setQr(null);
   try {
-    await fs.rm(config.authDir, { recursive: true, force: true });
+    await archiveSession();
   } catch (error) {
     logger.warn({ error }, 'Falha ao remover diretório de auth');
   }

@@ -32,6 +32,7 @@ export const config = {
     .map((item) => item.trim())
     .filter(Boolean),
   authDir: process.env.AUTH_DIR || './auth',
+  sessionDir: process.env.WA_SESSION_DIR || process.env.AUTH_DIR || './auth',
   botName: process.env.BOT_NAME || 'ParanaPOP Bot',
   mediaDownloadTimeoutMs: intEnv('MEDIA_DOWNLOAD_TIMEOUT_MS', 30000),
   maxMediaBytes: intEnv('MAX_MEDIA_BYTES', 15_000_000),
