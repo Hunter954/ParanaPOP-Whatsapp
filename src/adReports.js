@@ -24,9 +24,23 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
   const sessions = new Map();
   const processed = new Map();
   const TTL = 30 * 60_000;
+  const sessionKey=(scope,jid)=>`${scope}:${normalizeJid(jid)}`;
+  function context(message) {
+    const key=message?.key||{};
+    const jid=normalizeJid(key.remoteJid);
+    const inGroup=jid===groupId;
+    const aliases=(inGroup?[key.participant,key.participantAlt]:[jid,key.remoteJidAlt])
+      .filter(Boolean).map(normalizeJid).filter(id=>/@(?:s\.whatsapp\.net|lid)$/.test(id));
+    return {jid,inGroup,aliases,scope:inGroup?jid:'private',dedupe:`${jid}:${aliases[0]||''}:${key.id||''}`};
+  }
+  function say(session,text) {
+    return session.jid===groupId
+      ?sendText(session.jid,`@${session.owner.split('@')[0]} ${text}`,[session.owner])
+      :sendText(session.jid,text);
+  }
   function remember(session) {
     session.updatedAt = now().getTime();
-    for (const jid of session.aliases) sessions.set(normalizeJid(jid),session);
+    for (const jid of session.aliases) sessions.set(sessionKey(session.scope,jid),session);
   }
   function remove(session) {
     for (const [jid,value] of sessions) if (value===session) sessions.delete(jid);
@@ -40,26 +54,31 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
   async function open(message, candidates) {
     const member = await authorize(candidates);
     if (!member) return null;
+    const {jid,inGroup,scope}=context(message);
     const aliases = [...new Set([member.jid,...(member.aliases||[])].map(normalizeJid))];
-    const existing = aliases.map(id=>sessions.get(id)).find(Boolean);
+    const existing = aliases.map(id=>sessions.get(sessionKey(scope,id))).find(Boolean);
     if (existing?.step==='sending') {
-      await sendText(member.jid,'Já existe um relatório em envio para você. Aguarde o término.');
+      await say(existing,'Já existe um relatório em envio para você. Aguarde o término.');
       return existing;
     }
     if (existing) remove(existing);
-    const session={jid:member.jid,aliases,step:'section'};
+    const session={jid:inGroup?jid:member.jid,owner:member.jid,scope,aliases,step:'section'};
     remember(session);
-    await sendText(session.jid,INITIAL);
+    await say(session,INITIAL);
     return session;
   }
   async function beginFromGroup(message) {
     if (!enabled || message?.key?.fromMe || message?.key?.remoteJid!==groupId) return false;
-    const member=await open(message,[message.key.participant,message.key.participantAlt]);
+    sweep();
+    const {aliases,dedupe}=context(message);
+    if (!aliases.length) return false;
+    if (message.key.id && processed.has(dedupe)) return true;
+    if (message.key.id) processed.set(dedupe,now().getTime());
+    const member=await open(message,aliases);
     if (!member) {
       await sendText(groupId,'Não foi possível confirmar seu acesso ao relatório.');
       return true;
     }
-    await sendText(groupId,'Continue no privado do bot para escolher Topo ou Meio e o período do relatório.');
     return true;
   }
   async function deliver(session) {
@@ -67,7 +86,7 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
       if (!(await authorize(session.aliases))) throw new Error('Acesso ao grupo não confirmado');
       const query=`section=${session.section}&start=${session.start}&end=${session.end}`;
       const page=await api('/v1/captures?'+query+'&limit=1');
-      if (!page.items?.length) {await sendText(session.jid,'Não há capturas dessa seção salvas nesse período.');return;}
+      if (!page.items?.length) {await say(session,'Não há capturas dessa seção salvas nesse período.');return;}
       const report=await api('/v1/report.docx?'+query,true);
       const bytes=report.bytes;
       if (!Buffer.isBuffer(bytes)||bytes.length>70_000_000||bytes.subarray(0,4).toString('hex')!=='504b0304'||report.mime!==DOCX_MIME||
@@ -80,23 +99,17 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
       const text=error.response?.status===413?'O arquivo desse período ficou muito grande. Solicite um intervalo menor.':
         error.response?.status===429?'Outro relatório está em geração. Tente novamente em alguns minutos.':
         'Não foi possível gerar o relatório agora. Tente novamente em alguns minutos.';
-      await sendText(session.jid,text);
+      await say(session,text);
     } finally { remove(session); }
   }
   async function handle(message,text) {
     if (!enabled || message?.key?.fromMe) return false;
     sweep();
     const key=message?.key||{};
-    const jid=normalizeJid(key.remoteJid);
-    if (jid===groupId) {
-      if (COMMAND.test(text.trim())) return beginFromGroup(message);
-      return false;
-    }
-    if (!/@(?:s\.whatsapp\.net|lid)$/.test(jid)) return false;
-    const aliases=[jid,key.remoteJidAlt].filter(Boolean).map(normalizeJid);
-    const session=aliases.map(id=>sessions.get(id)).find(Boolean);
+    const {jid,inGroup,aliases,scope,dedupe}=context(message);
+    if ((!inGroup && !/@(?:s\.whatsapp\.net|lid)$/.test(jid)) || !aliases.length) return false;
+    const session=aliases.map(id=>sessions.get(sessionKey(scope,id))).find(Boolean);
     if (!session && !COMMAND.test(text.trim())) return false;
-    const dedupe=`${jid}:${key.id||''}`;
     if (key.id && processed.has(dedupe)) return true;
     if (key.id) processed.set(dedupe,now().getTime());
     if (session?.step==='sending') return true;
@@ -106,26 +119,28 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
     }
     if (!(await authorize([...aliases,...session.aliases]))) {remove(session);return true;}
     if (/^(?:sair|cancelar|voltar|menu)$/iu.test(text.trim())) {
-      remove(session);await sendText(jid,'Relatório encerrado. Para começar novamente, envie *relatório*.');return true;
+      remove(session);
+      if (inGroup && text.trim().toLowerCase()==='menu') return false;
+      await say(session,'Relatório encerrado. Para começar novamente, envie *relatório*.');return true;
     }
     if (session.step==='section') {
       const value=text.trim().toLocaleLowerCase('pt-BR');
       const section=['1','topo'].includes(value)?'top':['2','meio'].includes(value)?'middle':null;
-      if (!section) {await sendText(session.jid,'Escolha *1* para Topo ou *2* para Meio.');return true;}
+      if (!section) {await say(session,'Escolha *1* para Topo ou *2* para Meio.');return true;}
       session.section=section;session.step='start';remember(session);
-      await sendText(session.jid,'Qual é a data inicial? Envie no formato *DD/MM/AAAA*.');return true;
+      await say(session,'Qual é a data inicial? Envie no formato *DD/MM/AAAA*.');return true;
     }
     const selected=parseBrazilDate(text,todayInBrazil(now()));
     if (!selected) {
-      await sendText(session.jid,'Data inválida. Envie uma data existente, sem ser futura, no formato *DD/MM/AAAA*.');return true;
+      await say(session,'Data inválida. Envie uma data existente, sem ser futura, no formato *DD/MM/AAAA*.');return true;
     }
     if (session.step==='start') {
       session.start=selected;session.step='end';remember(session);
-      await sendText(session.jid,'Até qual data? Envie a data final no formato *DD/MM/AAAA*.');return true;
+      await say(session,'Até qual data? Envie a data final no formato *DD/MM/AAAA*.');return true;
     }
     const days=(Date.parse(selected)-Date.parse(session.start))/86400000;
     if(days<0||days>365) {
-      await sendText(session.jid,'A data final deve ser igual ou posterior à inicial, em um período de até 366 dias.');return true;
+      await say(session,'A data final deve ser igual ou posterior à inicial, em um período de até 366 dias.');return true;
     }
     session.end=selected;session.step='sending';remember(session);
     schedule(()=>deliver(session).catch(error=>log({event:'ad_report_notification_failed',message:error.message})));

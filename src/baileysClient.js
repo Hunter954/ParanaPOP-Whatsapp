@@ -43,7 +43,10 @@ const adReportFlow=createAdReportFlow({
     });
     return binary?{bytes:Buffer.from(response.data),sha256:response.headers['x-report-sha256'],mime:response.headers['content-type']?.split(';')[0]}:response.data;
   },
-  sendText:(jid,text)=>replyMessage(jid,text),
+  sendText:async(jid,text,mentions)=>{
+    ensureConnected();
+    return sock.sendMessage(jid,{text,...(mentions?.length?{mentions}:{})});
+  },
   sendDocument:(jid,bytes,fileName)=>mediaQueue.run(async()=>{
     ensureConnected();
     return sock.sendMessage(jid,{document:bytes,mimetype:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',fileName});

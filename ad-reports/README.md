@@ -6,7 +6,7 @@ Uma execução diária produz duas capturas reais em Google Chrome no Linux, com
 
 No grupo do Trivox: `menu` → `[9] Relatório de publicidade`, ou Publicidade → `[4] Relatório de publicidade`. Também aceita `relatório` no grupo ou no privado do bot.
 
-O bot verifica se o solicitante pertence ao grupo do Trivox e continua no privado, perguntando Topo ou Meio, a data inicial e a final, em DD/MM/AAAA. Depois envia um único DOCX com todas as capturas disponíveis da seção escolhida, em ordem cronológica, identificadas por data. Não envia as imagens separadamente nem mensagens de abertura ou conclusão junto do arquivo. O período máximo por solicitação é 366 dias; relatórios com mais de 60 MB de imagens pedem um intervalo menor. A sessão de escolha expira após 30 minutos.
+O bot verifica se o solicitante pertence ao grupo do Trivox e pergunta no próprio grupo Topo ou Meio, a data inicial e a final, em DD/MM/AAAA. As perguntas mencionam o solicitante, e cada participante tem sua própria sessão; respostas de outras pessoas ou do privado não avançam o pedido iniciado no grupo. Depois envia no mesmo grupo um único DOCX com todas as capturas disponíveis da seção escolhida, em ordem cronológica, identificadas por data. Não envia as imagens separadamente nem mensagens de abertura ou conclusão junto do arquivo. O período máximo por solicitação é 366 dias; relatórios com mais de 60 MB de imagens pedem um intervalo menor. A sessão de escolha expira após 30 minutos.
 
 ## Armazenamento e operação
 
@@ -29,4 +29,4 @@ Na imagem Node do bot, com os fontes e testes montados sem o volume de autentica
 
 `node --experimental-test-module-mocks --test test/*.test.js`
 
-Inclui calendário e fuso brasileiro, uma captura por dia, reinicialização sem duplicação, autenticação da API, isolamento de caminhos, autorização dos membros, conversas privadas com aliases PN/LID, validação de períodos, integridade dos arquivos, legendas somente com a data e preservação das funcionalidades anteriores do bot.
+Inclui calendário e fuso brasileiro, uma captura por dia, reinicialização sem duplicação, autenticação da API, isolamento de caminhos, autorização dos membros, conversas no grupo com aliases PN/LID e isolamento por participante e conversa, validação de períodos, integridade dos arquivos, legendas somente com a data e preservação das funcionalidades anteriores do bot.
