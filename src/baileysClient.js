@@ -15,9 +15,41 @@ import { config } from './config.js';
 import { resolveMedia, saveMediaStream, postMedia, removeTemp, tempMediaStats } from './media.js';
 import { SessionStore, mediaQueue } from './resourceLimits.js';
 import { handleAdminMenu, hasAdminMenuSession, clearAdminMenuSessions } from './adminMenu.js';
+import { createAdReportFlow, normalizeJid } from './adReports.js';
 import { createParanaPopAccess, handleParanaPopAccess, isParanaPopGroup, FREE_LIMIT_MESSAGE } from './paranaPopAccess.js';
 
 const paranaPopAccess = createParanaPopAccess(config);
+
+async function authorizeReportUser(candidates) {
+  if (!sock || !config.adminMenuTrivoxGroupId) return null;
+  const ids=candidates.filter(Boolean).map(normalizeJid);
+  const metadata=await sock.groupMetadata(config.adminMenuTrivoxGroupId);
+  const member=metadata?.participants?.find(person => [person.id,person.lid,person.phoneNumber]
+    .filter(Boolean).some(id => ids.includes(normalizeJid(id))));
+  if (!member) return null;
+  const aliases=[member.id,member.lid,member.phoneNumber,...ids].filter(Boolean).map(normalizeJid)
+    .filter(id => /@(?:s\.whatsapp\.net|lid)$/.test(id));
+  return {jid:aliases.find(id=>id.endsWith('@s.whatsapp.net')) || aliases[0],aliases};
+}
+
+const adReportFlow=createAdReportFlow({
+  enabled:Boolean(config.adReportsUrl && config.adReportsToken),
+  groupId:config.adminMenuTrivoxGroupId,
+  authorize:authorizeReportUser,
+  api:async (route,binary=false) => {
+    const response=await axios.get(config.adReportsUrl+route,{
+      headers:{Authorization:'Bearer '+config.adReportsToken},timeout:20000,
+      responseType:binary?'arraybuffer':'json',maxContentLength:15_000_000
+    });
+    return binary?Buffer.from(response.data):response.data;
+  },
+  sendText:(jid,text)=>replyMessage(jid,text),
+  sendImage:(jid,image,caption)=>mediaQueue.run(async()=>{
+    ensureConnected();
+    return sock.sendMessage(jid,{image,mimetype:'image/png',caption});
+  }),
+  log:entry=>logger.info(entry,'Relatório de publicidade')
+});
 
 const logger = P({ level: process.env.LOG_LEVEL || 'warn', serializers: { error: error => ({ name: error?.name, message: error?.message, status: error?.response?.status }) } });
 
@@ -637,7 +669,8 @@ function adminMenuConfigForGroup(remoteJid) {
       adminMenuApiUrl: config.adminMenuTrivoxApiUrl,
       adminMenuToken: config.adminMenuTrivoxToken,
       adminMenuBrandName: 'Portal Trivox',
-      adminMenuHasVideo: true
+      adminMenuHasVideo: true,
+      adminMenuHasAdReports: Boolean(config.adReportsUrl && config.adReportsToken)
     };
   }
   return null;
@@ -707,6 +740,7 @@ export async function startWhatsApp() {
           if (clearHandled) continue;
         }
         const scopedMenuConfig = adminMenuConfigForGroup(remoteJid);
+        if (await adReportFlow.handle(message,text)) continue;
         const menuHandled = scopedMenuConfig ? await handleAdminMenu({
           message,
           config: scopedMenuConfig,
@@ -715,7 +749,8 @@ export async function startWhatsApp() {
           participant,
           reply: (replyText) => replyMessage(remoteJid, replyText),
           startPhotoFlow: () => startPhotoFlowFromMenu(message),
-          startVideoFlow: () => startVideoFlowFromMenu(message)
+          startVideoFlow: () => startVideoFlowFromMenu(message),
+          startAdReportFlow: () => adReportFlow.beginFromGroup(message)
         }) : false;
         if (menuHandled) continue;
         const videoHandled = await handleVideoBot(message);
@@ -853,6 +888,16 @@ export async function sendMessage({ group_id, message }) {
 
   const result = await sock.sendMessage(group_id, { text: message });
   return { ok: true, message_id: result?.key?.id || null };
+}
+
+export async function sendLivoraPrivate(phone, content, messageId) {
+  ensureConnected();
+  const socket = sock;
+  const contacts = await socket.onWhatsApp(phone);
+  const contact = contacts?.find(item => item.exists && /^[0-9]+@s\.whatsapp\.net$/.test(item.jid));
+  if (!contact || socket !== sock || !connected) return false;
+  const result = await socket.sendMessage(contact.jid, content, messageId ? { messageId } : undefined);
+  return Boolean(result?.key?.id);
 }
 
 export async function sendRecoveryCode({ phone, code, name }) {

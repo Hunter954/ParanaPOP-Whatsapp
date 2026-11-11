@@ -17,17 +17,19 @@ function keyFor(remoteJid, participant) {
 }
 
 function mainMenu(config = {}) {
+  const reportsLine = config.adminMenuHasAdReports ? '\n[9] Relatório de publicidade' : '';
   const brand = config.adminMenuBrandName || 'Paraná Pop';
   const videoLine = config.adminMenuHasVideo === false ? '' : '\n[8] Vídeo Padrão';
-  return `🟢 *ADMIN ${brand.toLocaleUpperCase('pt-BR')}*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n[7] Imagem Padrão${videoLine}\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
+  return `🟢 *ADMIN ${brand.toLocaleUpperCase('pt-BR')}*\n\n[1] Visão Geral\n[2] Matérias\n[3] Usuários\n[4] Insights\n[5] Configurações / SEO\n[6] Publicidade\n[7] Imagem Padrão${videoLine}${reportsLine}\n\nDigite o número da opção.\nA qualquer momento: *menu*, *voltar* ou *sair*.`;
 }
 
 function postsMenu() {
   return `📰 *MATÉRIAS*\n\n[1] Nova Matéria\n[2] Excluir Matéria\n[3] Editar Matéria\n[4] Últimas Matérias\n[5] Buscar Matéria\n[0] Menu principal`;
 }
 
-function adsMenu() {
-  return `📣 *PUBLICIDADE*\n\n[1] Nova Publicidade\n[2] Excluir Publicidade\n[3] Ver Publicidades\n[0] Menu principal`;
+function adsMenu(config = {}) {
+  const reportsLine = config.adminMenuHasAdReports ? '\n[4] Relatório de publicidade' : '';
+  return `📣 *PUBLICIDADE*\n\n[1] Nova Publicidade\n[2] Excluir Publicidade\n[3] Ver Publicidades${reportsLine}\n[0] Menu principal`;
 }
 
 function settingsMenu() {
@@ -114,7 +116,7 @@ export function adminMenuConfigured(config) {
   return Boolean(config.adminMenuEnabled && config.adminMenuApiUrl && config.adminMenuToken && config.adminMenuGroupId);
 }
 
-export async function handleAdminMenu({ message, config, text, remoteJid, participant, reply, startPhotoFlow, startVideoFlow }) {
+export async function handleAdminMenu({ message, config, text, remoteJid, participant, reply, startPhotoFlow, startVideoFlow, startAdReportFlow }) {
   if (message?.key?.fromMe || !remoteJid || remoteJid !== config.adminMenuGroupId) return false;
   const value = normalize(text);
   const command = lower(value);
@@ -146,6 +148,9 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
 
   try {
     if (session.step === 'main') {
+      if (value === '9' && config.adminMenuHasAdReports && typeof startAdReportFlow === 'function') {
+        sessions.delete(key); await startAdReportFlow(); return true;
+      }
       if (value === '1') {
         const result = await api(config, 'overview');
         await reply(`📊 *VISÃO GERAL*\n\n👁️ Page views totais: ${result.page_views_total}\n🕐 Page views (24h): ${result.page_views_24h}\n📰 Total de matérias: ${result.posts_total}\n✍️ Matérias locais: ${result.local_posts}\n🌐 Matérias WordPress: ${result.wp_posts}\n🏷️ Categorias: ${result.categories_total}\n📣 Publicidades ativas: ${result.active_ads}\n👥 Usuários ativos: ${result.active_users}\n\nDigite *menu* para voltar.`);
@@ -164,7 +169,7 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
         return true;
       }
       if (value === '5') { setSession(key, { area: 'settings', step: 'settings_menu' }); await reply(settingsMenu()); return true; }
-      if (value === '6') { setSession(key, { area: 'ads', step: 'ads_menu' }); await reply(adsMenu()); return true; }
+      if (value === '6') { setSession(key, { area: 'ads', step: 'ads_menu' }); await reply(adsMenu(config)); return true; }
       if (value === '7') {
         if (typeof startPhotoFlow !== 'function') {
           await reply('⚠️ O gerador de imagem padrão não está disponível neste momento. Você ainda pode usar */foto*.');
@@ -273,6 +278,9 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
     }
 
     if (session.step === 'ads_menu') {
+      if (value === '4' && config.adminMenuHasAdReports && typeof startAdReportFlow === 'function') {
+        sessions.delete(key); await startAdReportFlow(); return true;
+      }
       if (value === '0') { setSession(key, { area: 'main', step: 'main' }); await reply(mainMenu(config)); return true; }
       if (value === '1') {
         const slots = (await api(config, 'ads.list')).slots || [];
@@ -284,8 +292,8 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
         setSession(key, { area: 'ads', step: 'ad_delete_select', slots });
         await reply(`🗑️ Escolha a publicidade para remover:\n\n${formatAds(slots)}`); return true;
       }
-      if (value === '3') { const r = await api(config, 'ads.list'); await reply(`📣 *PUBLICIDADES*\n\n${formatAds(r.slots)}\n\n${adsMenu()}`); return true; }
-      await reply(adsMenu()); return true;
+      if (value === '3') { const r = await api(config, 'ads.list'); await reply(`📣 *PUBLICIDADES*\n\n${formatAds(r.slots)}\n\n${adsMenu(config)}`); return true; }
+      await reply(adsMenu(config)); return true;
     }
     if (session.step === 'ad_new_slot') {
       const slot = selected(session.slots || [], value);
@@ -305,7 +313,7 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
     if (session.step === 'ad_new_link') {
       const result = await api(config, 'ads.create', { slot_id: session.slot.id, ...session.draft, link_url: value === '0' ? '#' : value });
       setSession(key, { area: 'ads', step: 'ads_menu' });
-      await reply(`✅ Publicidade ativada em *${result.slot.name}*.\n\n${adsMenu()}`); return true;
+      await reply(`✅ Publicidade ativada em *${result.slot.name}*.\n\n${adsMenu(config)}`); return true;
     }
     if (session.step === 'ad_delete_select') {
       const slot = selected(session.slots || [], value);
@@ -316,7 +324,7 @@ export async function handleAdminMenu({ message, config, text, remoteJid, partic
     if (session.step === 'ad_delete_confirm') {
       if (['sim', 's'].includes(command)) await api(config, 'ads.delete', { slot_id: session.slot.id });
       setSession(key, { area: 'ads', step: 'ads_menu' });
-      await reply(`${['sim', 's'].includes(command) ? '✅ Publicidade removida.' : 'Remoção cancelada.'}\n\n${adsMenu()}`); return true;
+      await reply(`${['sim', 's'].includes(command) ? '✅ Publicidade removida.' : 'Remoção cancelada.'}\n\n${adsMenu(config)}`); return true;
     }
 
     if (session.step === 'settings_menu') {

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <theme><name>Clearlooks</name><titleLayout>NLIMC</titleLayout><font place="ActiveWindow"><name>Liberation Sans</name><size>11</size></font></theme>
+  <desktops><number>1</number></desktops>
+  <applications>
+    <application class="Google-chrome"><maximized>yes</maximized></application>
+    <application class="Mousepad"><iconic>yes</iconic></application>
+    <application class="Galculator"><iconic>yes</iconic></application>
+    <application class="galculator"><iconic>yes</iconic></application>
+  </applications>
+</openbox_config>

@@ -34,6 +34,8 @@ export const config = {
   authDir: process.env.AUTH_DIR || './auth',
   sessionDir: process.env.WA_SESSION_DIR || process.env.AUTH_DIR || './auth',
   botName: process.env.BOT_NAME || 'ParanaPOP Bot',
+  adReportsUrl: (process.env.TRIVOX_AD_REPORTS_URL || '').trim().replace(/\/$/, ''),
+  adReportsToken: process.env.TRIVOX_AD_REPORTS_TOKEN || '',
   mediaDownloadTimeoutMs: intEnv('MEDIA_DOWNLOAD_TIMEOUT_MS', 30000),
   maxMediaBytes: intEnv('MAX_MEDIA_BYTES', 15_000_000),
   maxVideoBytes: intEnv('MAX_VIDEO_BYTES', 80_000_000),

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Menu Linux
+Exec=true
+Icon=/home/capture/.config/tint2/menu.svg
+Terminal=false

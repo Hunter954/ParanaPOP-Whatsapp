@@ -13,6 +13,7 @@ import {
   sendMessage,
   sendNews,
   sendRecoveryCode,
+  sendLivoraPrivate,
   startWhatsApp
 } from './baileysClient.js';
 
@@ -131,6 +132,52 @@ app.post('/send-recovery-code', asyncRoute(async (req, res) => {
     return res.status(503).json({ accepted: false });
   }
 }));
+
+function requireLivoraToken(req, res, next) {
+  const token = process.env.LIVORA_BOT_TOKEN;
+  if (!token || !timingSafeEqual(digest(req.get('Authorization') || ''), digest('Bearer ' + token))) {
+    return res.sendStatus(401);
+  }
+  next();
+}
+
+const livoraPhone = value => typeof value === 'string' && /^[1-9][0-9]{9,14}$/.test(value);
+
+app.get('/livora/status', requireLivoraToken, (_req, res) => {
+  res.json({ status: getStatus().state });
+});
+
+app.post('/livora/otp', requireLivoraToken, asyncRoute(async (req, res) => {
+  const { phone, code } = req.body || {};
+  if (!livoraPhone(phone) || typeof code !== 'string' || !/^[0-9]{6}$/.test(code)) return res.sendStatus(400);
+  try {
+    const sent = await sendLivoraPrivate(phone, {
+      text: '*Livora | Código de acesso*\n\nSeu código é *' + code + '*. Ele vale por 5 minutos. Não compartilhe este código.',
+    });
+    return res.status(sent ? 202 : 422).json({ accepted: sent });
+  } catch {
+    return res.status(503).json({ accepted: false });
+  }
+}));
+
+app.post('/livora/document', requireLivoraToken,
+  express.raw({ type: 'application/pdf', limit: '30mb' }), asyncRoute(async (req, res) => {
+    const phone = req.get('X-Livora-Phone');
+    const messageId = req.get('X-Livora-Message-Id');
+    if (!livoraPhone(phone) || !/^3EB0[A-F0-9]{18}$/.test(messageId || '') ||
+        !Buffer.isBuffer(req.body) || req.body.subarray(0, 5).toString() !== '%PDF-') {
+      return res.sendStatus(400);
+    }
+    try {
+      const sent = await sendLivoraPrivate(phone, {
+        document: req.body, mimetype: 'application/pdf', fileName: 'Livora-traducao.pdf',
+        caption: 'Sua tradução está pronta. Boa leitura! 📚',
+      }, messageId);
+      return res.status(sent ? 202 : 422).json({ accepted: sent });
+    } catch {
+      return res.status(503).json({ accepted: false });
+    }
+  }));
 
 app.post('/send-image', requireServiceToken, asyncRoute(async (req, res) => {
   res.json(await sendImage(req.body));

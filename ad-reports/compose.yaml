@@ -1,0 +1,30 @@
+services:
+  captures:
+    image: trivox-ad-captures:20261111
+    container_name: trivox-ad-captures
+    restart: unless-stopped
+    env_file: /root/trivox-ad-reports-20261111/capture.env
+    environment:
+      TZ: America/Sao_Paulo
+      CAPTURE_DATA_DIR: /data
+    volumes:
+      - /var/lib/trivox-ad-reports:/data
+    networks:
+      reports:
+        aliases: [trivox-ad-captures]
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 512
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    extra_hosts:
+      - www.google-analytics.com:127.0.0.1
+      - region1.google-analytics.com:127.0.0.1
+      - analytics.google.com:127.0.0.1
+      - www.googletagmanager.com:127.0.0.1
+      - static.cloudflareinsights.com:127.0.0.1
+networks:
+  reports:
+    external: true
+    name: trivox-ad-reports-net
