@@ -1,6 +1,6 @@
 # Relatórios de publicidade do Portal Trivox
 
-Uma captura real por dia, em Google Chrome no Linux, com painel tint2 de aparência semelhante ao Windows e os aplicativos reais Mousepad e galculator abertos. O horário muda entre dias consecutivos, entre 08h e 17h59 de Brasília, com minutos variados. O relógio e a data são os do sistema sincronizado; nenhum horário é inserido artificialmente na foto. O desktop tem 1920 × 1800 para enquadrar as cinco posições de publicidade hoje preenchidas na página inicial.
+Uma captura real por dia, em Google Chrome no Linux, com painel tint2 de aparência semelhante ao Windows e os aplicativos reais Mousepad e galculator abertos. O horário muda entre dias consecutivos, entre 08h e 17h59 de Brasília, com minutos variados. O relógio e a data são os do sistema sincronizado; nenhum horário é inserido artificialmente na foto. O desktop tem 1440 × 1500 para aproximar as cinco posições de publicidade preenchidas na página inicial, reduzindo as margens laterais e a área abaixo dos anúncios. O enquadramento ocorre no desktop real, antes da captura, preservando a barra do navegador e o relógio.
 
 ## WhatsApp
 

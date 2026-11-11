@@ -12,6 +12,9 @@ from urllib.parse import urlsplit
 
 import websocket
 
+SCREEN_WIDTH = 1440
+SCREEN_HEIGHT = 1500
+
 
 class CDP:
     def __init__(self, url):
@@ -67,7 +70,7 @@ def capture(destination):
 
     cdp = None
     try:
-        start(['Xvfb', ':99', '-screen', '0', '1920x1800x24', '-nolisten', 'tcp'])
+        start(['Xvfb', ':99', '-screen', '0', f'{SCREEN_WIDTH}x{SCREEN_HEIGHT}x24', '-nolisten', 'tcp'])
         for _ in range(50):
             if subprocess.run(['xdpyinfo'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
                 break
@@ -132,12 +135,13 @@ def capture(destination):
         # Validate the raw PNG header; never alter pixels after capture.
         with open(destination, 'rb') as image:
             header = image.read(24)
-        if header[:8] != b'\x89PNG\r\n\x1a\n' or int.from_bytes(header[16:20], 'big') != 1920 or int.from_bytes(header[20:24], 'big') != 1800:
+        if header[:8] != b'\x89PNG\r\n\x1a\n' or int.from_bytes(header[16:20], 'big') != SCREEN_WIDTH or int.from_bytes(header[20:24], 'big') != SCREEN_HEIGHT:
             raise RuntimeError('Captura PNG inválida')
         version = subprocess.check_output(['google-chrome-stable', '--version'], text=True).strip()
         return {'captured_at_utc': before, 'capture_completed_at_utc': after,
             'browser': version, 'environment': 'Linux, Openbox, tint2; real Mousepad and galculator applications',
-            'timezone': 'America/Sao_Paulo', 'page': state, 'post_capture_image_edits': False}
+            'timezone': 'America/Sao_Paulo', 'desktop_dimensions': [SCREEN_WIDTH, SCREEN_HEIGHT],
+            'page': state, 'post_capture_image_edits': False}
     finally:
         if cdp:
             cdp.socket.close()

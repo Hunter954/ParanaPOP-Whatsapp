@@ -1,6 +1,6 @@
 services:
   captures:
-    image: trivox-ad-captures:20261111
+    image: trivox-ad-captures:20261111-framing-v2
     container_name: trivox-ad-captures
     restart: unless-stopped
     env_file: /root/trivox-ad-reports-20261111/capture.env
