@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends /tmp/chrome.deb \
     && rm /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 capture
+RUN apt-get update && apt-get install -y --no-install-recommends python3-docx && rm -rf /var/lib/apt/lists/*
 COPY --chown=capture:capture desktop /home/capture/.config
 COPY policies.json /etc/opt/chrome/policies/managed/capture.json
 COPY *.py /opt/capture/

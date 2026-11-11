@@ -38,15 +38,15 @@ const adReportFlow=createAdReportFlow({
   authorize:authorizeReportUser,
   api:async (route,binary=false) => {
     const response=await axios.get(config.adReportsUrl+route,{
-      headers:{Authorization:'Bearer '+config.adReportsToken},timeout:20000,
-      responseType:binary?'arraybuffer':'json',maxContentLength:15_000_000
+      headers:{Authorization:'Bearer '+config.adReportsToken},timeout:120000,
+      responseType:binary?'arraybuffer':'json',maxContentLength:70_000_000
     });
-    return binary?Buffer.from(response.data):response.data;
+    return binary?{bytes:Buffer.from(response.data),sha256:response.headers['x-report-sha256'],mime:response.headers['content-type']?.split(';')[0]}:response.data;
   },
   sendText:(jid,text)=>replyMessage(jid,text),
-  sendImage:(jid,image,caption)=>mediaQueue.run(async()=>{
+  sendDocument:(jid,bytes,fileName)=>mediaQueue.run(async()=>{
     ensureConnected();
-    return sock.sendMessage(jid,{image,mimetype:'image/png',caption});
+    return sock.sendMessage(jid,{document:bytes,mimetype:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',fileName});
   }),
   log:entry=>logger.info(entry,'Relatório de publicidade')
 });

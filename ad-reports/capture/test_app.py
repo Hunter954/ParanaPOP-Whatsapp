@@ -24,13 +24,12 @@ class CaptureTests(unittest.TestCase):
         app.ROOT, app.TOKEN = self.old_root, self.old_token
         self.temp.cleanup()
 
-    def insert_capture(self, day, identifier='a'*32):
+    def insert_capture(self, day, identifier='a'*32, section='legacy', data=b'original-test-png-bytes'):
         filename = f'images/{identifier}.png'
-        data = b'original-test-png-bytes'
         (app.ROOT/filename).write_bytes(data)
         with app.connect() as db:
-            db.execute('INSERT INTO captures VALUES(?,?,?,?,?,?,?,?)', (identifier,None,day,
-                day+'T23:59:01-03:00',filename,hashlib.sha256(data).hexdigest(),len(data),'{}'))
+            db.execute('INSERT INTO captures(id,schedule_id,day,captured_at,filename,sha256,bytes,metadata,section) VALUES(?,?,?,?,?,?,?,?,?)', (identifier,None,day,
+                day+'T23:59:01-03:00',filename,hashlib.sha256(data).hexdigest(),len(data),'{}',section))
         return data
 
     def test_one_real_execution_per_day_and_different_next_day_time(self):
@@ -49,6 +48,8 @@ class CaptureTests(unittest.TestCase):
     def test_restart_does_not_capture_again_or_fabricate_past_days(self):
         today = datetime.now(app.TZ)
         self.insert_capture(today.date().isoformat())
+        self.insert_capture(today.date().isoformat(),'b'*32,'top')
+        self.insert_capture(today.date().isoformat(),'c'*32,'middle')
         with app.connect() as db:
             db.execute('INSERT INTO schedule(id,day,due_at,status) VALUES(?,?,?,?)',
                 ('old',(today.date()-timedelta(days=1)).isoformat(),today.isoformat(),'pending'))

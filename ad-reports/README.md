@@ -1,12 +1,12 @@
 # Relatórios de publicidade do Portal Trivox
 
-Uma captura real por dia, em Google Chrome no Linux, com painel tint2 de aparência semelhante ao Windows e os aplicativos reais Mousepad e galculator abertos. O horário muda entre dias consecutivos, entre 08h e 17h59 de Brasília, com minutos variados. O relógio e a data são os do sistema sincronizado; nenhum horário é inserido artificialmente na foto. O desktop tem 1440 × 1500 para aproximar as cinco posições de publicidade preenchidas na página inicial, reduzindo as margens laterais e a área abaixo dos anúncios. O enquadramento ocorre no desktop real, antes da captura, preservando a barra do navegador e o relógio.
+Uma execução diária produz duas capturas reais em Google Chrome no Linux, com zoom padrão de 100% e desktop de 1920 × 1080. A primeira registra o Topo, com três banners; a segunda registra o Meio, com os dois banners dessa seção, após rolar a página normalmente. O painel tint2 tem aparência semelhante ao Windows e os aplicativos reais Mousepad e galculator ficam abertos. O horário muda entre dias consecutivos, entre 08h e 17h59 de Brasília, com minutos variados. O relógio e a data são os do sistema sincronizado; nenhum horário é inserido artificialmente na foto.
 
 ## WhatsApp
 
 No grupo do Trivox: `menu` → `[9] Relatório de publicidade`, ou Publicidade → `[4] Relatório de publicidade`. Também aceita `relatório` no grupo ou no privado do bot.
 
-O bot verifica se o solicitante pertence ao grupo do Trivox e continua no privado, pedindo primeiro a data inicial e depois a final, em DD/MM/AAAA. O envio contém apenas imagens, em ordem cronológica, com DD/MM/AAAA na legenda. As perguntas e mensagens de erro são privadas; não há texto de abertura ou conclusão misturado às fotos. O período máximo por solicitação é 366 dias. A sessão de escolha expira após 30 minutos.
+O bot verifica se o solicitante pertence ao grupo do Trivox e continua no privado, perguntando Topo ou Meio, a data inicial e a final, em DD/MM/AAAA. Depois envia um único DOCX com todas as capturas disponíveis da seção escolhida, em ordem cronológica, identificadas por data. Não envia as imagens separadamente nem mensagens de abertura ou conclusão junto do arquivo. O período máximo por solicitação é 366 dias; relatórios com mais de 60 MB de imagens pedem um intervalo menor. A sessão de escolha expira após 30 minutos.
 
 ## Armazenamento e operação
 
@@ -17,13 +17,13 @@ O bot verifica se o solicitante pertence ao grupo do Trivox e continua no privad
 - Segredos ficam fora do repositório, em `capture.env` protegido na VPS e nas variáveis do serviço WhatsApp/Dokploy: `TRIVOX_AD_REPORTS_URL` e `TRIVOX_AD_REPORTS_TOKEN`.
 - Não há exclusão automática dos comprovantes. Acompanhar o espaço em disco e definir retenção conforme a operação desejar.
 
-O serviço persiste o agendamento. Reinicialização não duplica uma foto já salva. Se perder o horário enquanto estiver desligado, pode recuperar uma captura no mesmo dia, sempre com a hora real da recuperação. Dias anteriores não são reconstruídos. Falhas de carregamento ou enquadramento têm até três tentativas, com 15 minutos de intervalo, e ficam registradas no status.
+O serviço persiste o agendamento e admite uma imagem por dia por seção. Reinicialização não duplica um par já salvo. Se perder o horário enquanto estiver desligado, pode recuperar o par no mesmo dia, sempre com a hora real da recuperação. Dias anteriores não são reconstruídos. Falhas de carregamento ou enquadramento têm até três tentativas, com 15 minutos de intervalo, e ficam registradas no status. As capturas completas do formato anterior permanecem arquivadas como `legacy` e não são reclassificadas como Topo ou Meio.
 
-A captura verifica que todos os banners presentes na página inicial estão carregados e visíveis. Se futuramente houver múltiplos banners em rotação no mesmo espaço, ou publicidade exclusiva de outra página, uma única foto não consegue documentar tudo; será preciso rever o enquadramento ou a quantidade de imagens. O sistema não força a exibição, não altera o conteúdo do portal e não monta fotografias. A imagem demonstra o instante capturado e não certifica veiculação contínua.
+A captura verifica três banners carregados e visíveis no Topo e dois no Meio. Se futuramente houver múltiplos banners em rotação no mesmo espaço ou mudanças nas posições, será preciso rever o enquadramento. O sistema não força a exibição, não altera o conteúdo do portal e não monta fotografias. Cada imagem demonstra o instante capturado e não certifica veiculação contínua. O DOCX preserva os bytes dos PNGs originais, com duas capturas por página, e fica em `/var/lib/trivox-ad-reports/reports/`.
 
 ## Validação
 
-`python3 -m unittest discover -s capture -p test_app.py -v`
+`python3 -m unittest discover -s capture -p 'test_*.py' -v`
 
 Na imagem Node do bot, com os fontes e testes montados sem o volume de autenticação:
 

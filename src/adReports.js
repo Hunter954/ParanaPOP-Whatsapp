@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 
 const COMMAND = /^(?:\/?relat[oó]rio(?:\s+de\s+publicidade)?|\/?comprovantes)$/iu;
-const INITIAL = '*Relatório de publicidade — Portal Trivox*\nCapturas automáticas em Linux, com Google Chrome e relógio real.\n\nQual é a data inicial? Envie no formato *DD/MM/AAAA*.\nPara cancelar: *sair*.';
+const INITIAL = '*Relatório de publicidade — Portal Trivox*\nCapturas automáticas em Linux, Google Chrome com zoom padrão e relógio real.\n\nQual seção você quer no documento Word?\n[1] Topo — três banners\n[2] Meio — dois banners\n\nDigite *1* ou *2*. Para cancelar: *sair*.';
+const DOCX_MIME='application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 export const normalizeJid = value => String(value || '').replace(/:\d+(?=@)/, '');
 
 export function parseBrazilDate(value, today) {
@@ -17,7 +18,7 @@ export function todayInBrazil(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit'}).format(now);
 }
 
-export function createAdReportFlow({enabled, groupId, authorize, api, sendText, sendImage,
+export function createAdReportFlow({enabled, groupId, authorize, api, sendText, sendDocument,
   now = () => new Date(), delay = ms => new Promise(resolve => setTimeout(resolve,ms)),
   schedule = task => setImmediate(task), log = () => {}}) {
   const sessions = new Map();
@@ -46,7 +47,7 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
       return existing;
     }
     if (existing) remove(existing);
-    const session={jid:member.jid,aliases,step:'start'};
+    const session={jid:member.jid,aliases,step:'section'};
     remember(session);
     await sendText(session.jid,INITIAL);
     return session;
@@ -58,35 +59,28 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
       await sendText(groupId,'Não foi possível confirmar seu acesso ao relatório.');
       return true;
     }
-    await sendText(groupId,'Continue no privado do bot para escolher as datas do relatório.');
+    await sendText(groupId,'Continue no privado do bot para escolher Topo ou Meio e o período do relatório.');
     return true;
   }
   async function deliver(session) {
-    let sent=0;
     try {
-      let offset=0;
-      do {
-        if (!(await authorize(session.aliases))) throw new Error('Acesso ao grupo não confirmado');
-        const page=await api(`/v1/captures?start=${session.start}&end=${session.end}&offset=${offset}&limit=50`);
-        if (!page.items?.length && sent===0) {
-          await sendText(session.jid,'Não há capturas salvas nesse período.');
-          return;
-        }
-        for (const item of page.items || []) {
-          if (!/^[0-9a-f]{32}$/.test(item.id) || item.image_path!==`/v1/images/${item.id}.png`) throw new Error('Resposta inválida do arquivo de capturas');
-          const bytes=await api(item.image_path,true);
-          if (!Buffer.isBuffer(bytes) || bytes.length>15_000_000 || crypto.createHash('sha256').update(bytes).digest('hex')!==item.sha256) throw new Error('A imagem não corresponde ao registro original');
-          // The report contains photos with only their actual capture date as caption.
-          await sendImage(session.jid,bytes,item.date_label);
-          sent+=1;
-          await delay(450);
-        }
-        offset=page.next_offset;
-      } while(offset!==null && offset!==undefined);
-      log({event:'ad_report_delivered',count:sent,start:session.start,end:session.end});
+      if (!(await authorize(session.aliases))) throw new Error('Acesso ao grupo não confirmado');
+      const query=`section=${session.section}&start=${session.start}&end=${session.end}`;
+      const page=await api('/v1/captures?'+query+'&limit=1');
+      if (!page.items?.length) {await sendText(session.jid,'Não há capturas dessa seção salvas nesse período.');return;}
+      const report=await api('/v1/report.docx?'+query,true);
+      const bytes=report.bytes;
+      if (!Buffer.isBuffer(bytes)||bytes.length>70_000_000||bytes.subarray(0,4).toString('hex')!=='504b0304'||report.mime!==DOCX_MIME||
+          crypto.createHash('sha256').update(bytes).digest('hex')!==report.sha256) throw new Error('O documento não corresponde ao original gerado');
+      const label=session.section==='top'?'Topo':'Meio';
+      await sendDocument(session.jid,bytes,`PortalTrivox_${label}_${session.start}_a_${session.end}.docx`);
+      log({event:'ad_report_document_delivered',count:page.total,section:session.section,start:session.start,end:session.end});
     } catch(error) {
-      log({event:'ad_report_failed',count:sent,message:error.message});
-      await sendText(session.jid,sent ? 'O envio foi interrompido. Solicite novamente o período para recuperar as imagens.' : 'Não foi possível consultar o relatório agora. Tente novamente em alguns minutos.');
+      log({event:'ad_report_failed',message:error.message});
+      const text=error.response?.status===413?'O arquivo desse período ficou muito grande. Solicite um intervalo menor.':
+        error.response?.status===429?'Outro relatório está em geração. Tente novamente em alguns minutos.':
+        'Não foi possível gerar o relatório agora. Tente novamente em alguns minutos.';
+      await sendText(session.jid,text);
     } finally { remove(session); }
   }
   async function handle(message,text) {
@@ -113,6 +107,13 @@ export function createAdReportFlow({enabled, groupId, authorize, api, sendText, 
     if (!(await authorize([...aliases,...session.aliases]))) {remove(session);return true;}
     if (/^(?:sair|cancelar|voltar|menu)$/iu.test(text.trim())) {
       remove(session);await sendText(jid,'Relatório encerrado. Para começar novamente, envie *relatório*.');return true;
+    }
+    if (session.step==='section') {
+      const value=text.trim().toLocaleLowerCase('pt-BR');
+      const section=['1','topo'].includes(value)?'top':['2','meio'].includes(value)?'middle':null;
+      if (!section) {await sendText(session.jid,'Escolha *1* para Topo ou *2* para Meio.');return true;}
+      session.section=section;session.step='start';remember(session);
+      await sendText(session.jid,'Qual é a data inicial? Envie no formato *DD/MM/AAAA*.');return true;
     }
     const selected=parseBrazilDate(text,todayInBrazil(now()));
     if (!selected) {
